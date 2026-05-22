@@ -1,0 +1,5 @@
+bin/
+build/
+*.gen.c
+.DS_Store
+*.swp

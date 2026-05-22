@@ -1,0 +1,90 @@
+module Main
+
+# SwarmRT LiveView — chat demo (Phase 4: PubSub, handle_info)
+#
+#   bin/swc build studio/chat_lv.sw -o /tmp/chat_lv
+#   /tmp/chat_lv      ->  http://localhost:4003
+#
+# Open two browser tabs. A message sent in one is broadcast over the
+# "room" topic; every subscribed session gets it in handle_info and
+# re-renders. The sender sees its own message the same way — through
+# the broadcast — so all tabs stay identical.
+
+import LiveView
+
+# mount: subscribe this session to the room — but only the live WS
+# session, never the dead HTTP render (connected guards the side effect).
+fun mount(params) {
+    if (LiveView.connected(params) == 'true') {
+        LiveView.subscribe("room")
+    } else {
+        'noop'
+    }
+    %{messages: []}
+}
+
+# function component — one message row.
+fun msg_item(m) {
+    LiveView.h(
+        "<div style=\"padding:.35rem 0;border-bottom:1px solid #1e1e1e\">{{}}</div>",
+        [m])
+}
+
+fun render(assigns) {
+    msgs = map_get(assigns, 'messages')
+    LiveView.h(
+        "<div style=\"max-width:560px;margin:3rem auto;font-family:sans-serif\">" ++
+        "<h1 style=\"font-size:1.5rem;font-weight:600\">Live Chat</h1>" ++
+        "<p style=\"color:#888;margin:.4rem 0 1rem;font-size:.85rem\">" ++
+        "open two tabs — messages broadcast to every session via PubSub</p>" ++
+        "<div style=\"min-height:220px;margin-bottom:1rem\">{{}}</div>" ++
+        "<form sw-submit=\"say\" style=\"display:flex;gap:.5rem\">" ++
+        "<input name=\"text\" placeholder=\"type a message...\" autocomplete=\"off\" " ++
+        "style=\"flex:1\" autofocus><button type=\"submit\">send</button></form>" ++
+        "</div>",
+        [LiveView.list(msgs, msg_item)])
+}
+
+# A sent message is broadcast to the whole room — including this
+# session, so every tab updates through the one code path.
+fun handle_event(name, value, assigns) {
+    if (name == "say") {
+        text = form_text(value)
+        if (string_length(string_trim(text)) > 0) {
+            LiveView.broadcast("room", {'chat', string_trim(text)})
+        } else {
+            'noop'
+        }
+        assigns
+    } else {
+        assigns
+    }
+}
+
+# A broadcast {'chat', text} arrives here — append + re-render.
+fun handle_info(msg, assigns) {
+    if (elem(msg, 0) == 'chat') {
+        LiveView.assign(assigns, 'messages',
+            list_append(map_get(assigns, 'messages'), elem(msg, 1)))
+    } else {
+        assigns
+    }
+}
+
+fun form_text(value) {
+    if (value == nil) { "" }
+    else {
+        t = map_get(value, 'text')
+        if (t == nil) { "" } else { to_string(t) }
+    }
+}
+
+fun main() {
+    LiveView.start(4003, %{
+        title: "Live Chat",
+        mount: mount,
+        render: render,
+        handle_event: handle_event,
+        handle_info: handle_info
+    })
+}
