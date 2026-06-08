@@ -81,11 +81,26 @@ fun js() {
     "  bind();\n" ++
     "}\n" ++
     "\n" ++
+    "/* Reconnecting toast — injected into <body>, not #live-root, so\n" ++
+    "   diffs don't touch it. */\n" ++
+    "var _toast=null;\n" ++
+    "function showReconnecting(){\n" ++
+    "  if(_toast)return;\n" ++
+    "  _toast=document.createElement('div');\n" ++
+    "  _toast.id='sw-reconnect';\n" ++
+    "  _toast.style.cssText='position:fixed;bottom:1.2rem;left:50%;transform:translateX(-50%);'" ++
+    "+'background:#1e1e1e;color:#e6e6e6;padding:.5rem 1.25rem;border-radius:9999px;'" ++
+    "+'font-size:.8rem;font-family:sans-serif;box-shadow:0 2px 12px rgba(0,0,0,.5);z-index:9999';\n" ++
+    "  _toast.textContent='reconnecting...';\n" ++
+    "  document.body.appendChild(_toast)}\n" ++
+    "function hideReconnecting(){\n" ++
+    "  if(_toast){_toast.parentNode&&_toast.parentNode.removeChild(_toast);_toast=null}}\n" ++
+    "\n" ++
     "/* WebSocket connection with exponential backoff. */\n" ++
     "function connect(){\n" ++
     "  var proto=location.protocol==='https:'?'wss:':'ws:';\n" ++
     "  ws=new WebSocket(proto+'//'+location.host+'/live/ws');\n" ++
-    "  ws.onopen=function(){retries=0;\n" ++
+    "  ws.onopen=function(){retries=0;hideReconnecting();\n" ++
     "    ws.send(JSON.stringify({t:'join',p:location.pathname}))};\n" ++
     "  ws.onmessage=function(e){\n" ++
     "    var msg;\n" ++
@@ -97,8 +112,10 @@ fun js() {
     "      for(k in c)dynamics[parseInt(k,10)]=c[k];\n" ++
     "      render()}\n" ++
     "    else if(msg.t==='s'){applyStream(msg)}\n" ++
+    "    else if(msg.t==='patch'){history.pushState({},'',msg.p)}\n" ++
     "  };\n" ++
     "  ws.onclose=function(){\n" ++
+    "    showReconnecting();\n" ++
     "    var delay=Math.min(1000*Math.pow(2,retries++),30000);\n" ++
     "    setTimeout(connect,delay)};\n" ++
     "  ws.onerror=function(){};\n" ++
@@ -184,7 +201,12 @@ fun js() {
     "      send(el.getAttribute('sw-blur'),el.value||getVals(el))}});\n" ++
     "  document.querySelectorAll('[sw-focus]').forEach(function(el){\n" ++
     "    el.onfocus=function(){\n" ++
-    "      send(el.getAttribute('sw-focus'),el.value||getVals(el))}})\n" ++
+    "      send(el.getAttribute('sw-focus'),el.value||getVals(el))}});\n" ++
+    "  document.querySelectorAll('[sw-scroll]').forEach(function(el){\n" ++
+    "    el.onscroll=deb(el,function(){\n" ++
+    "      send(el.getAttribute('sw-scroll'),\n" ++
+    "        {scrollTop:el.scrollTop,scrollLeft:el.scrollLeft,\n" ++
+    "         scrollHeight:el.scrollHeight,clientHeight:el.clientHeight})})})\n" ++
     "}\n" ++
     "\n" ++
     "connect();\n" ++

@@ -24,7 +24,8 @@ module UI
 import LiveView
 
 export [css, button, card, input, label, badge, alert, separator,
-        switch, avatar, skeleton, progress, dialog, spinner, tooltip]
+        switch, avatar, skeleton, progress, dialog, spinner, tooltip,
+        select, textarea, table]
 
 # opt-or-default, stringified.
 fun o(opts, k, dflt) {
@@ -126,6 +127,11 @@ fun css() {
     "color:hsl(var(--bg));padding:.25rem .55rem;border-radius:.35rem;" ++
     "font-size:.72rem;white-space:nowrap;transition:opacity .12s}" ++
     ".ui-tooltip:hover .ui-tooltip-text{visibility:visible;opacity:1}" ++
+    ".ui-table{width:100%;border-collapse:collapse;font-size:.875rem}" ++
+    ".ui-table th{text-align:left;padding:.6rem .85rem;font-weight:600;" ++
+    "border-bottom:2px solid hsl(var(--border));color:hsl(var(--muted-fg))}" ++
+    ".ui-table td{padding:.55rem .85rem;border-bottom:1px solid hsl(var(--border))}" ++
+    ".ui-table tbody tr:hover{background:hsl(var(--muted) / .4)}" ++
     "</style>"
 }
 
@@ -262,4 +268,68 @@ fun tooltip(opts) {
     "<span class=\"ui-tooltip\">" ++ LiveView.esc(o(opts, 'label', "")) ++
     "<span class=\"ui-tooltip-text\">" ++ LiveView.esc(o(opts, 'tip', "")) ++
     "</span></span>"
+}
+
+# select — %{name, options, value?, event?, extra?}
+# options: list of %{value, label} maps. Server-driven via sw-change.
+fun select(opts) {
+    ev = o(opts, 'event', "")
+    cl = if (ev == "") { "" } else { " sw-change=\"" ++ ev ++ "\"" }
+    cur = o(opts, 'value', "")
+    items = map_get(opts, 'options')
+    body = if (items == nil) { "" } else { select_opts(items, cur, "") }
+    "<select class=\"ui-input\" name=\"" ++ LiveView.esc(o(opts, 'name', "")) ++ "\"" ++
+    cl ++ " " ++ o(opts, 'extra', "") ++ ">" ++ body ++ "</select>"
+}
+
+fun select_opts(items, cur, acc) {
+    if (items == nil || length(items) == 0) { acc }
+    else {
+        it = hd(items)
+        v  = to_string(map_get(it, 'value'))
+        lbl = to_string(map_get(it, 'label'))
+        sel = if (v == cur) { " selected" } else { "" }
+        opt = "<option value=\"" ++ LiveView.esc(v) ++ "\"" ++ sel ++ ">" ++
+              LiveView.esc(lbl) ++ "</option>"
+        select_opts(tl(items), cur, acc ++ opt)
+    }
+}
+
+# textarea — %{name, value?, placeholder?, rows?, event?, extra?}
+fun textarea(opts) {
+    ev = o(opts, 'event', "")
+    cl = if (ev == "") { "" } else { " sw-input=\"" ++ ev ++ "\"" }
+    "<textarea class=\"ui-input\" name=\"" ++ LiveView.esc(o(opts, 'name', "")) ++ "\"" ++
+    " rows=\"" ++ o(opts, 'rows', "3") ++ "\"" ++
+    " placeholder=\"" ++ LiveView.esc(o(opts, 'placeholder', "")) ++ "\"" ++
+    " style=\"height:auto;padding:.5rem .75rem;resize:vertical\"" ++
+    cl ++ " " ++ o(opts, 'extra', "") ++ ">" ++
+    LiveView.esc(o(opts, 'value', "")) ++ "</textarea>"
+}
+
+# table — %{headers, rows}
+# headers: list of strings. rows: list of lists of strings (or raw HTML cells).
+fun table(opts) {
+    hdrs = map_get(opts, 'headers')
+    rows = map_get(opts, 'rows')
+    head = if (hdrs == nil || length(hdrs) == 0) { "" }
+           else { "<thead><tr>" ++ table_ths(hdrs, "") ++ "</tr></thead>" }
+    body = if (rows == nil || length(rows) == 0) { "" }
+           else { "<tbody>" ++ table_rows(rows, "") ++ "</tbody>" }
+    "<div style=\"overflow-x:auto\"><table class=\"ui-table\">" ++ head ++ body ++ "</table></div>"
+}
+
+fun table_ths(hdrs, acc) {
+    if (hdrs == nil || length(hdrs) == 0) { acc }
+    else { table_ths(tl(hdrs), acc ++ "<th>" ++ LiveView.esc(to_string(hd(hdrs))) ++ "</th>") }
+}
+
+fun table_rows(rows, acc) {
+    if (rows == nil || length(rows) == 0) { acc }
+    else { table_rows(tl(rows), acc ++ "<tr>" ++ table_tds(hd(rows), "") ++ "</tr>") }
+}
+
+fun table_tds(cells, acc) {
+    if (cells == nil || length(cells) == 0) { acc }
+    else { table_tds(tl(cells), acc ++ "<td>" ++ LiveView.esc(to_string(hd(cells))) ++ "</td>") }
 }

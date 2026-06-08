@@ -36,7 +36,7 @@ import Client
 #   client -> server   {t:"e", n:"event", v:{...}}                 event
 
 export [start, h, raw, assign, esc, page, list, input, error_tag,
-        connected, subscribe, broadcast, presence_track,
+        connected, subscribe, broadcast, presence_track, push_patch,
         stream_append, stream_prepend, stream_delete, stream_reset]
 
 # ------------------------------------------------------------
@@ -342,6 +342,15 @@ fun broadcast(topic, msg) {
 fun presence_track(topic) {
     ps = whereis('lv_pubsub')
     if (ps == nil) { 'noop' } else { send(ps, {'track', topic, self()}) }
+}
+
+# Push a URL update to the browser without remounting the view.
+# Use from handle_event when the URL should reflect new state (e.g.
+# /search?q=foo after a search box submission).
+fun push_patch(assigns, path) {
+    conn = map_get(assigns, '_conn')
+    if (conn == nil) { 'noop' }
+    else { ws_send(conn, json_encode(%{t: "patch", p: to_string(path)})) }
 }
 
 # A session announces its own death so presence counts stay honest.
