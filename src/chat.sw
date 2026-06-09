@@ -57,10 +57,11 @@ fun render(assigns) {
             "<h1 style=\"font-size:1.5rem;font-weight:600\">Live Chat</h1>" ++
             "<p style=\"color:#888;margin:.4rem 0 1rem;font-size:.85rem\">" ++
             "chatting as <b>{{}}</b> &middot; open more tabs to test PubSub</p>" ++
-            "<div style=\"min-height:220px;margin-bottom:1rem\">{{}}</div>" ++
+            "<div sw-autoscroll style=\"height:320px;overflow-y:auto;margin-bottom:1rem;" ++
+            "border:1px solid #1e1e1e;border-radius:6px;padding:.5rem\">{{}}</div>" ++
             "<form sw-submit=\"say\" style=\"display:flex;gap:.5rem\">" ++
-            "<input name=\"text\" placeholder=\"type a message...\" autocomplete=\"off\" " ++
-            "style=\"flex:1\" autofocus><button type=\"submit\">send</button></form>" ++
+            "<input name=\"text\" placeholder=\"type a message... (Enter to send)\" autocomplete=\"off\" " ++
+            "sw-enter=\"say\" style=\"flex:1\" autofocus><button type=\"submit\">send</button></form>" ++
             "</div>",
             [uname, LiveView.list(msgs, msg_item)])
     }

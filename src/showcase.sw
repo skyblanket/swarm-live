@@ -128,6 +128,49 @@ fun render(assigns) {
             UI.button(%{label: "Confirm", variant: "default", js: "hide:#demo-dialog"})
     })
 
+    select_card = UI.card(%{
+        title: "Select &amp; Textarea",
+        description: "New in swarmUI — server-driven dropdowns and multiline inputs.",
+        content:
+            UI.label("Priority") ++
+            UI.select(%{name: "priority", value: "medium",
+                options: [ %{value: "low",    label: "Low"},
+                           %{value: "medium", label: "Medium"},
+                           %{value: "high",   label: "High"},
+                           %{value: "urgent", label: "Urgent"} ]}) ++
+            "<div style=\"height:.75rem\"></div>" ++
+            UI.label("Notes") ++
+            UI.textarea(%{name: "notes", placeholder: "write something...", rows: "3"})
+    })
+
+    table_card = UI.card(%{
+        title: "Table",
+        content: UI.table(%{
+            headers: ["Component", "Type", "Status"],
+            rows: [
+                ["button",   "interactive", "stable"],
+                ["card",     "layout",      "stable"],
+                ["select",   "form",        "new"],
+                ["textarea", "form",        "new"],
+                ["table",    "data",        "new"],
+                ["tabs",     "navigation",  "new"]
+            ]
+        })
+    })
+
+    tabs_card = UI.card(%{
+        title: "Tabs",
+        description: "Client-side tab switching — no server round-trip.",
+        content: UI.tabs(%{tabs: [
+            %{id: "tab-overview",  label: "Overview",
+              content: "<p style=\"font-size:.875rem;color:hsl(var(--muted-fg))\">Tabs switch client-side via sw-js. No diff is fired on tab change — the server only knows if you wire a sw-click event.</p>"},
+            %{id: "tab-usage",    label: "Usage",
+              content: "<p style=\"font-size:.875rem;color:hsl(var(--muted-fg))\">UI.tabs(%{tabs: [{id, label, content}, ...], active?}) renders the tab bar and panels. Pass active: \"id\" to set the default.</p>"},
+            %{id: "tab-notes",    label: "Notes",
+              content: "<p style=\"font-size:.875rem;color:hsl(var(--muted-fg))\">Panels use sw-tab-panel; triggers use sw-tab and sw-js=\"tab:panel-id\". The active class is ui-tab-active.</p>"}
+        ]})
+    })
+
     LiveView.h(
         UI.css() ++
         "<div style=\"max-width:780px;margin:3rem auto 5rem;padding:0 1.25rem\">" ++
@@ -140,7 +183,10 @@ fun render(assigns) {
         alerts_card ++ "<div style=\"height:1.5rem\"></div>" ++
         interactive_card ++ "<div style=\"height:1.5rem\"></div>" ++
         skeleton_card ++ "<div style=\"height:1.5rem\"></div>" ++
-        dialog_card ++
+        dialog_card ++ "<div style=\"height:1.5rem\"></div>" ++
+        select_card ++ "<div style=\"height:1.5rem\"></div>" ++
+        table_card ++ "<div style=\"height:1.5rem\"></div>" ++
+        tabs_card ++
         dlg ++
         "<div style=\"text-align:center;color:hsl(var(--muted-fg));font-size:.8rem;margin-top:3rem\">" ++
         "swarmUI &middot; on swarmrt LiveView</div>" ++

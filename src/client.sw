@@ -60,8 +60,14 @@ fun js() {
     "    if(i<fc.length)morph(fc[i],tc[i]);\n" ++
     "    else root.appendChild(tc[i])}\n" ++
     "  while(root.childNodes.length>tc.length)root.removeChild(root.lastChild);\n" ++
-    "  bind();\n" ++
+    "  bind();autoscroll();\n" ++
     "}\n" ++
+    "\n" ++
+    "/* Scroll any [sw-autoscroll] containers to the bottom. Called after\n" ++
+    "   every render and after stream appends so chat/feed stay pinned. */\n" ++
+    "function autoscroll(){\n" ++
+    "  document.querySelectorAll('[sw-autoscroll]').forEach(function(el){\n" ++
+    "    el.scrollTop=el.scrollHeight})}\n" ++
     "\n" ++
     "/* Apply a stream op to a sw-stream container: append/prepend a node,\n" ++
     "   delete one by sw-key, or reset — no full re-render. */\n" ++
@@ -78,7 +84,7 @@ fun js() {
     "  if(!node)return;\n" ++
     "  if(m.op==='prepend')c.insertBefore(node,c.firstChild);\n" ++
     "  else c.appendChild(node);\n" ++
-    "  bind();\n" ++
+    "  bind();autoscroll();\n" ++
     "}\n" ++
     "\n" ++
     "/* Reconnecting toast — injected into <body>, not #live-root, so\n" ++
@@ -145,7 +151,20 @@ fun js() {
     "    else if(verb==='hide')el.style.display='none';\n" ++
     "    else if(verb==='add-class')el.classList.add(arg);\n" ++
     "    else if(verb==='remove-class')el.classList.remove(arg);\n" ++
-    "    else if(verb==='toggle-class')el.classList.toggle(arg)})\n" ++
+    "    else if(verb==='toggle-class')el.classList.toggle(arg);\n" ++
+    "    /* tab:panel-id — activate a tab panel and its trigger button.\n" ++
+    "       Hides all siblings with [sw-tab-panel], shows the target;\n" ++
+    "       removes ui-tab-active from all [sw-tab], adds to the caller. */\n" ++
+    "    else if(verb==='tab'){\n" ++
+    "      var panel=document.getElementById(sel);\n" ++
+    "      if(!panel)return;\n" ++
+    "      var panels=panel.parentNode.querySelectorAll('[sw-tab-panel]');\n" ++
+    "      panels.forEach(function(p){p.style.display='none'});\n" ++
+    "      panel.style.display='';\n" ++
+    "      var tabs=document.querySelectorAll('[sw-tab=\"'+sel+'\"]');\n" ++
+    "      document.querySelectorAll('[sw-tab]').forEach(function(t){\n" ++
+    "        t.classList.remove('ui-tab-active')});\n" ++
+    "      tabs.forEach(function(t){t.classList.add('ui-tab-active')})}})\n" ++
     "}\n" ++
     "\n" ++
     "/* Collect sw-value-* attributes off an element. */\n" ++
@@ -206,7 +225,13 @@ fun js() {
     "    el.onscroll=deb(el,function(){\n" ++
     "      send(el.getAttribute('sw-scroll'),\n" ++
     "        {scrollTop:el.scrollTop,scrollLeft:el.scrollLeft,\n" ++
-    "         scrollHeight:el.scrollHeight,clientHeight:el.clientHeight})})})\n" ++
+    "         scrollHeight:el.scrollHeight,clientHeight:el.clientHeight})})});\n" ++
+    "  /* sw-enter: fire event when Enter is pressed (no form wrapper needed). */\n" ++
+    "  document.querySelectorAll('[sw-enter]').forEach(function(el){\n" ++
+    "    el.onkeydown=function(e){\n" ++
+    "      if(e.key==='Enter'&&!e.shiftKey){\n" ++
+    "        e.preventDefault();\n" ++
+    "        send(el.getAttribute('sw-enter'),el.value||getVals(el))}}})\n" ++
     "}\n" ++
     "\n" ++
     "connect();\n" ++

@@ -25,7 +25,7 @@ import LiveView
 
 export [css, button, card, input, label, badge, alert, separator,
         switch, avatar, skeleton, progress, dialog, spinner, tooltip,
-        select, textarea, table]
+        select, textarea, table, tabs]
 
 # opt-or-default, stringified.
 fun o(opts, k, dflt) {
@@ -127,6 +127,13 @@ fun css() {
     "color:hsl(var(--bg));padding:.25rem .55rem;border-radius:.35rem;" ++
     "font-size:.72rem;white-space:nowrap;transition:opacity .12s}" ++
     ".ui-tooltip:hover .ui-tooltip-text{visibility:visible;opacity:1}" ++
+    ".ui-tabs{display:flex;gap:.25rem;border-bottom:1px solid hsl(var(--border));margin-bottom:1rem}" ++
+    ".ui-tab{background:transparent;border:none;color:hsl(var(--muted-fg));padding:.55rem .9rem;" ++
+    "font-size:.875rem;font-weight:500;cursor:pointer;border-bottom:2px solid transparent;" ++
+    "margin-bottom:-1px;border-radius:0;transition:.12s;font-family:inherit}" ++
+    ".ui-tab:hover{color:hsl(var(--fg))}" ++
+    ".ui-tab-active{color:hsl(var(--fg));border-bottom-color:hsl(var(--primary))}" ++
+    ".ui-tab-panel{}" ++
     ".ui-table{width:100%;border-collapse:collapse;font-size:.875rem}" ++
     ".ui-table th{text-align:left;padding:.6rem .85rem;font-weight:600;" ++
     "border-bottom:2px solid hsl(var(--border));color:hsl(var(--muted-fg))}" ++
@@ -332,4 +339,48 @@ fun table_rows(rows, acc) {
 fun table_tds(cells, acc) {
     if (cells == nil || length(cells) == 0) { acc }
     else { table_tds(tl(cells), acc ++ "<td>" ++ LiveView.esc(to_string(hd(cells))) ++ "</td>") }
+}
+
+# tabs — %{tabs: [{id, label, content}], active?}
+# Purely client-side switching via sw-js="tab:<id>". The first tab (or
+# the one matching `active`) is shown; the rest are hidden. No server
+# round-trip on tab change.
+fun tabs(opts) {
+    items  = map_get(opts, 'tabs')
+    active = o(opts, 'active', "")
+    first  = if (items == nil || length(items) == 0) { nil } else { hd(items) }
+    act_id = if (active == "" && first != nil) { to_string(map_get(first, 'id')) }
+             else { active }
+    if (items == nil || length(items) == 0) { "" }
+    else {
+        bar     = tabs_bar(items, act_id, "")
+        panels  = tabs_panels(items, act_id, "")
+        "<div><div class=\"ui-tabs\">" ++ bar ++ "</div>" ++ panels ++ "</div>"
+    }
+}
+
+fun tabs_bar(items, act_id, acc) {
+    if (items == nil || length(items) == 0) { acc }
+    else {
+        it  = hd(items)
+        id  = to_string(map_get(it, 'id'))
+        lbl = to_string(map_get(it, 'label'))
+        cls = if (id == act_id) { " ui-tab-active" } else { "" }
+        btn = "<button class=\"ui-tab" ++ cls ++ "\" sw-tab=\"" ++ id ++
+              "\" sw-js=\"tab:" ++ id ++ "\">" ++ LiveView.esc(lbl) ++ "</button>"
+        tabs_bar(tl(items), act_id, acc ++ btn)
+    }
+}
+
+fun tabs_panels(items, act_id, acc) {
+    if (items == nil || length(items) == 0) { acc }
+    else {
+        it      = hd(items)
+        id      = to_string(map_get(it, 'id'))
+        content = to_string(map_get(it, 'content'))
+        disp    = if (id == act_id) { "" } else { "display:none;" }
+        panel   = "<div id=\"" ++ id ++ "\" sw-tab-panel style=\"" ++ disp ++ "\">" ++
+                  content ++ "</div>"
+        tabs_panels(tl(items), act_id, acc ++ panel)
+    }
 }
