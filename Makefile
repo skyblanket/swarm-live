@@ -6,7 +6,7 @@ SWC := ../swarmrt/bin/swc
 EXAMPLES := counter todo router chat feed showcase canvas arena
 BINS := $(addprefix bin/,$(EXAMPLES))
 
-LIB_SOURCES := src/liveview.sw src/ui.sw src/client.sw
+LIB_SOURCES := src/liveview.sw src/ui.sw src/client.sw src/ArenaJs.sw
 
 .PHONY: all clean
 all: $(BINS)

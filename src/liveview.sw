@@ -188,7 +188,13 @@ fun esc(s) {
 # ------------------------------------------------------------
 # Page shell — the dead-render HTML wrapper + embedded client
 # ------------------------------------------------------------
-fun page(title, body) {
+fun page(title, body) { page_js(title, body, "") }
+
+# page_js: same shell, plus an optional per-view script (the view map's
+# `js` key) that runs after the client boots. It can use window.swSend(name,
+# value) to talk to handle_event and register window.SwEvents[name] = fn to
+# receive {t:"ev", n:name, d:data} frames the server ws_sends (see client.sw).
+fun page_js(title, body, js) {
     "<!DOCTYPE html><html><head><meta charset=\"utf-8\">" ++
     "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" ++
     "<title>" ++ esc(title) ++ "</title>" ++
@@ -200,7 +206,14 @@ fun page(title, body) {
     "input,textarea,select{background:#1a1a1a;color:#e6e6e6;border:1px solid #333;" ++
     "border-radius:6px;padding:8px 12px;outline:none}</style>" ++
     "</head><body><div id=\"live-root\">" ++ body ++ "</div>" ++
-    "<script>" ++ Client.js() ++ "</script></body></html>"
+    "<script>" ++ Client.js() ++ "</script>" ++
+    (if (js == "") { "" } else { "<script>" ++ js ++ "</script>" }) ++
+    "</body></html>"
+}
+
+fun lv_js(view) {
+    j = map_get(view, 'js')
+    if (j == nil) { "" } else { to_string(j) }
 }
 
 fun lv_title(view) {
@@ -431,7 +444,9 @@ fun serve(routes) {
             http_respond(conn, 204, "", "")
             serve(routes)
 
-        {'http_request', conn, 'GET', path, _h, _b} ->
+        {'http_request', conn, 'GET', rawpath, _h, _b} ->
+            # route on the path alone: "/?x=1" must still match "/"
+            path = hd(string_split(to_string(rawpath), "?"))
             matched = match_route(routes, path)
             if (matched == nil) {
                 http_respond(conn, 404, "Content-Type: text/html\r\n",
@@ -443,7 +458,7 @@ fun serve(routes) {
                 # presence side effects on the plain GET.
                 dr = mfn(map_put(map_get(matched, 'params'), '_connected', 'false'))
                 http_respond(conn, 200, "Content-Type: text/html\r\n",
-                             page(lv_title(v), stitch(render_view(v, dr))))
+                             page_js(lv_title(v), stitch(render_view(v, dr)), lv_js(v)))
             }
             serve(routes)
 

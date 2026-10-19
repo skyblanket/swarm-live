@@ -143,6 +143,7 @@ fun js() {
     "      for(k in c)dynamics[parseInt(k,10)]=c[k];\n" ++
     "      render()}\n" ++
     "    else if(msg.t==='s'){applyStream(msg)}\n" ++
+    "    else if(msg.t==='ev'){var f=window.SwEvents&&window.SwEvents[msg.n];if(f)f(msg.d)}\n" ++
     "    else if(msg.t==='patch'){history.pushState({},'',msg.p)}\n" ++
     "  };\n" ++
     "  ws.onclose=function(){\n" ++
@@ -157,6 +158,8 @@ fun js() {
     "  if(ws&&ws.readyState===1)\n" ++
     "    ws.send(JSON.stringify({t:'e',n:n,v:v||{}}))\n" ++
     "}\n" ++
+    "\n" ++
+    "window.swSend=send;\n" ++
     "\n" ++
     "/* Live navigation: change the URL, ask the server to re-mount. */\n" ++
     "function navTo(path,push){\n" ++
@@ -256,7 +259,7 @@ fun js() {
     "  document.querySelectorAll('[sw-click-key]').forEach(function(el){\n" ++
     "    el.onclick=function(e){\n" ++
     "      var k=e.target.closest&&e.target.closest('[sw-key]');\n" ++
-    "      if(k&&el.contains(k))send(el.getAttribute('sw-click-key'),{key:k.getAttribute('sw-key')})}});\n" ++
+    "      if(k&&el.contains(k)){k.classList.add('hit');send(el.getAttribute('sw-click-key'),{key:k.getAttribute('sw-key')})}}});\n" ++
     "  /* sw-pointer=\"evt\": normalized (0..1) pointer events, throttled.\n" ++
     "     Sends {k:'down'|'draw'|'move'|'up', x, y}. */\n" ++
     "  document.querySelectorAll('[sw-pointer]').forEach(function(el){\n" ++

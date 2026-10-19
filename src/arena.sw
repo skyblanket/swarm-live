@@ -4,41 +4,60 @@ module Main
 #
 #   make bin/arena && ./bin/arena      ->  http://localhost:4007
 #
-# 600 real swarmrt processes, one per cell, all supervised. Every agent
-# pings other agents; cell brightness is how many pings it just received.
-# Click a cell (or hit "kill 10%") and that process gets a 'killed' exit
-# signal — the dynamic supervisor restarts it and the cell flashes orange.
-# The stats are the runtime's own swarm_stats(). Updates reach the browser
-# as batched stream upserts (only the cells that changed).
+# 600 real swarmrt processes under one dynamic supervisor. A driver ticks
+# every agent every 100ms; each tick an agent sends `burst` pings to other
+# agents. Every ~100ms the arena samples the real counters (pings received,
+# restart generations, last peer, kill/start timestamps) and ws_sends ONE
+# compact frame to each viewer; src/arena.js draws it on a canvas:
+#   heat    = pings each agent just received
+#   comets  = real recent agent -> agent messages
+#   kills   = exit_proc(pid, 'killed') -> shockwave, supervisor beam
+#   respawn = the supervisor's restart (generation counter bumped), with the
+#             measured kill -> restart time
+# Nothing on screen is simulated.
 
 import LiveView
+import ArenaJs
+import Std
 
 let n_agents = 600
-let tick_ms = 200
+let tick_ms = 100
+
+# ETS key space: the pid lives at i; every other per-agent value is a band
+# of n_agents ints above it. Ints, not strings — agents touch these hundreds
+# of thousands of times a second.
+let k_gen = 1000
+let k_recv = 2000
+let k_prev_recv = 3000
+let k_prev_gen = 4000
+let k_prev_bucket = 5000
+let k_last_peer = 7000
+let k_start_ts = 8000
+let k_kill_ts = 9000
 
 # ------------------------------------------------------------
 # Agents
 # ------------------------------------------------------------
 fun agent(i, tab) {
     ets_put(tab, i, self())
-    ets_update_counter(tab, "g/" ++ to_string(i), 1, 0)
+    ets_put(tab, k_start_ts + i, timestamp())
+    ets_update_counter(tab, k_gen + i, 1, 0)
     agent_loop(i, tab, 0)
 }
 
-# Drain pings first (after 0 fires only on an empty mailbox), then send
-# this round's burst and nap. A pending 'killed' signal lands any time.
+# Pings only COUNT. Sending is driven by the driver's {'tick'} so the rate
+# is exactly burst x agents x 10/s — if a ping could trigger sends, every
+# message would spawn k more and the swarm would saturate itself.
 fun agent_loop(i, tab, round) {
     receive {
         {'ping'} ->
-            ets_update_counter(tab, "r/" ++ to_string(i), 1, 0)
+            ets_update_counter(tab, k_recv + i, 1, 0)
             agent_loop(i, tab, round)
+        {'tick'} ->
+            fire(i, tab, round, num(ets_get(tab, 'burst')))
+            agent_loop(i, tab, round + 1)
         _o ->
             agent_loop(i, tab, round)
-        after 0 {
-            fire(i, tab, round, num(ets_get(tab, 'burst')))
-            sleep(100)
-            agent_loop(i, tab, round + 1)
-        }
     }
 }
 
@@ -49,13 +68,32 @@ fun fire(i, tab, round, k) {
         # so a few agents are hubs and the grid shows a heat gradient
         a = (i * 17 + k * 131 + round * 7) % n_agents
         b = (i * 29 + k * 53 + round * 13) % n_agents
-        peer = ets_get(tab, a * b / n_agents)
+        p = a * b / n_agents
+        ets_put(tab, k_last_peer + i, p)
+        peer = ets_get(tab, p)
         if (peer == nil) { 'skip' } else { send(peer, {'ping'}) }
         fire(i, tab, round, k - 1)
     }
 }
 
 fun num(x) { if (x == nil) { 0 } else { x } }
+
+# One driver ticks every agent every 100ms (looks pids up fresh, so a
+# restarted agent is picked up on the very next tick).
+fun driver_loop(tab) {
+    tick_agents(tab, 0)
+    sleep(tick_ms)
+    driver_loop(tab)
+}
+
+fun tick_agents(tab, i) {
+    if (i >= n_agents) { 'ok' }
+    else {
+        pid = ets_get(tab, i)
+        if (pid == nil) { 'skip' } else { send(pid, {'tick'}) }
+        tick_agents(tab, i + 1)
+    }
+}
 
 fun spawn_agents(sup, tab, i) {
     if (i >= n_agents) { 'ok' }
@@ -66,51 +104,54 @@ fun spawn_agents(sup, tab, i) {
 }
 
 # ------------------------------------------------------------
-# Arena — samples the table every tick, broadcasts only what changed
+# Arena — samples the table every tick, broadcasts one frame
 # ------------------------------------------------------------
-fun bucket(d) {
-    if (d <= 0) { 0 } else { if (d <= 5) { 1 } else { if (d <= 25) { 2 } else { if (d <= 100) { 3 } else { 4 } } } }
+fun bucket(d0) {
+    d = d0 * 100 / tick_ms
+    if (d <= 0) { 0 } else { if (d <= 2) { 1 } else { if (d <= 6) { 2 } else { if (d <= 20) { 3 } else { 4 } } } }
 }
 
-fun cell_html(i, b, revived) {
-    cls = if (revived == 'true') { "c l" ++ to_string(b) ++ " rv" } else { "c l" ++ to_string(b) }
-    "<i sw-key=\"" ++ to_string(i) ++ "\" class=\"" ++ cls ++ "\"></i>"
-}
-
-fun tick_cells(tab, i, acc, sum) {
-    if (i >= n_agents) { {acc, sum} }
+# Walk agents high -> low so consing builds heat[] in ascending order.
+# Collects respawn events (generation bumped) and the total pings received.
+fun sample(tab, i, heat, evs, sum) {
+    if (i < 0) { {heat, evs, sum} }
     else {
-        si = to_string(i)
-        r = num(ets_get(tab, "r/" ++ si))
-        pr = num(ets_get(tab, "pr/" ++ si))
-        g = num(ets_get(tab, "g/" ++ si))
-        pg = num(ets_get(tab, "pg/" ++ si))
-        pb = num(ets_get(tab, "pb/" ++ si))
+        r = num(ets_get(tab, k_recv + i))
+        pr = num(ets_get(tab, k_prev_recv + i))
+        g = num(ets_get(tab, k_gen + i))
+        pg = num(ets_get(tab, k_prev_gen + i))
         b = bucket(r - pr)
-        ets_put(tab, "pr/" ++ si, r)
-        ets_put(tab, "pg/" ++ si, g)
-        ets_put(tab, "pb/" ++ si, b)
-        revived = if (g > pg && pg > 0) { 'true' } else { 'false' }
-        if (b != pb || revived == 'true') {
-            tick_cells(tab, i + 1, [cell_html(i, b, revived) | acc], sum + (r - pr))
+        ets_put(tab, k_prev_recv + i, r)
+        ets_put(tab, k_prev_gen + i, g)
+        if (g > pg && pg > 0) {
+            ms = num(ets_get(tab, k_start_ts + i)) - num(ets_get(tab, k_kill_ts + i))
+            ev = ['u', i, to_string(ets_get(tab, i)), ms, g]
+            sample(tab, i - 1, [b | heat], [ev | evs], sum + (r - pr))
         } else {
-            tick_cells(tab, i + 1, acc, sum + (r - pr))
+            sample(tab, i - 1, [b | heat], evs, sum + (r - pr))
         }
     }
 }
 
-fun snapshot(tab, i, acc) {
-    if (i >= n_agents) { acc }
+# Every 5th agent's most recent real destination: [[from, to], ...]
+fun edges(tab, i, acc) {
+    if (i < 0) { acc }
     else {
-        si = to_string(i)
-        snapshot(tab, i + 1, [cell_html(i, num(ets_get(tab, "pb/" ++ si)), 'false') | acc])
+        p = ets_get(tab, k_last_peer + i)
+        if (p == nil) { edges(tab, i - 5, acc) } else { edges(tab, i - 5, [[i, p] | acc]) }
     }
 }
 
 fun kill_one(tab, i) {
     pid = ets_get(tab, i)
-    if (pid == nil) { 'noop' } else { exit_proc(pid, 'killed') }
+    if (pid == nil) { 'noop' } else {
+        ets_put(tab, k_kill_ts + i, timestamp())
+        ets_put(tab, 'evq', [['k', i, to_string(pid)] | num_list(ets_get(tab, 'evq'))])
+        exit_proc(pid, 'killed')
+    }
 }
+
+fun num_list(x) { if (x == nil) { [] } else { x } }
 
 fun kill_random(tab, k) {
     if (k <= 0) { 'ok' }
@@ -119,6 +160,25 @@ fun kill_random(tab, k) {
         kill_one(tab, (c * 7919 + 13) % n_agents)
         kill_random(tab, k - 1)
     }
+}
+
+fun frame_json(tab) {
+    res = sample(tab, n_agents - 1, [], [], 0)
+    kills = num_list(ets_get(tab, 'evq'))
+    ets_put(tab, 'evq', [])
+    total = ets_update_counter(tab, 'total', elem(res, 2), 0)
+    st = swarm_stats()
+    json_encode(%{t: "ev", n: "frame", d: %{
+        h: elem(res, 0),
+        e: edges(tab, n_agents - 1, []),
+        ev: Std.reverse(kills) ++ elem(res, 1),
+        p: map_get(st, 'processes'),
+        c: map_get(st, 'crashes'),
+        r: map_get(st, 'restarts'),
+        m: elem(res, 2) * 1000 / tick_ms,
+        tot: total,
+        b: num(ets_get(tab, 'burst'))
+    }})
 }
 
 fun arena_loop(tab) {
@@ -132,15 +192,8 @@ fun arena_loop(tab) {
         {'burst', b} ->
             ets_put(tab, 'burst', b)
             arena_loop(tab)
-        {'snap', pid} ->
-            send(pid, {'cells', snapshot(tab, 0, [])})
-            arena_loop(tab)
         after tick_ms {
-            res = tick_cells(tab, 0, [], 0)
-            st = swarm_stats()
-            LiveView.broadcast("arena", {'tick', elem(res, 0), elem(res, 1) * 1000 / tick_ms,
-                map_get(st, 'processes'), map_get(st, 'crashes'),
-                map_get(st, 'restarts'), map_get(st, 'mailbox_dropped')})
+            LiveView.broadcast("arena", {'frame', frame_json(tab)})
             arena_loop(tab)
         }
     }
@@ -152,91 +205,85 @@ fun arena_send(msg) {
 }
 
 # ------------------------------------------------------------
-# View
+# View — a static shell; all motion is in arena.js
 # ------------------------------------------------------------
 fun mount(params) {
     if (LiveView.connected(params) == 'true') {
         LiveView.subscribe("arena")
-        arena_send({'snap', self()})
     } else {
         'noop'
     }
-    %{procs: 0, crashes: 0, restarts: 0, rate: 0, drops: 0}
+    %{}
 }
 
-fun stat(label, dyn) {
-    "<div class=\"st\"><b>" ++ dyn ++ "</b><span>" ++ label ++ "</span></div>"
+fun stat(id, label) {
+    "<div class=\"st\"><b id=\"" ++ id ++ "\">-</b><span>" ++ label ++ "</span></div>"
 }
 
 fun render(assigns) {
     LiveView.h(
         "<style>" ++
-        "body{margin:0;background:#0a0a0a}" ++
-        ".arena{max-width:980px;margin:0 auto;padding:1.5rem 1rem;font-family:sans-serif;color:#e6e6e6}" ++
-        ".arena h1{font-size:1.25rem;font-weight:600;margin:0 0 .25rem}" ++
-        ".arena p{color:#888;font-size:.85rem;margin:0 0 1rem}" ++
-        ".stats{display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:1rem}" ++
-        ".st{display:flex;flex-direction:column}.st b{font-size:1.5rem;font-variant-numeric:tabular-nums}" ++
-        ".st span{font-size:.7rem;color:#777;text-transform:uppercase;letter-spacing:.06em}" ++
-        ".bar{display:flex;gap:.5rem;margin-bottom:1rem;flex-wrap:wrap}" ++
-        "#grid{display:grid;grid-template-columns:repeat(30,1fr);gap:2px}" ++
-        ".c{aspect-ratio:1;border-radius:2px;background:#151515;cursor:pointer;display:block}" ++
-        ".c:hover{outline:1px solid #888}" ++
-        ".l1{background:#12303a}.l2{background:#14586b}.l3{background:#1493a8}.l4{background:#4fd1e8}" ++
-        ".rv{animation:rv 1.2s ease-out}" ++
-        "@keyframes rv{0%{background:#f97316;transform:scale(1.8)}100%{transform:scale(1)}}" ++
+        "html,body{height:100%;overflow:hidden;background:#07080a}" ++
+        "#stage{position:fixed;inset:0;width:100vw;height:100vh;display:block}" ++
+        ".hud{position:fixed;top:14px;left:20px;font-family:-apple-system,sans-serif;color:#e6e6e6;pointer-events:none}" ++
+        ".hud h1{font-size:1.1rem;font-weight:600;letter-spacing:.02em}" ++
+        ".hud p{font-size:.78rem;color:#7d8590;margin-top:2px}" ++
+        ".side{position:fixed;top:14px;right:16px;width:300px;font-family:-apple-system,sans-serif;color:#e6e6e6}" ++
+        ".stats{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;background:rgba(18,20,24,.82);" ++
+        "border:1px solid #23272e;border-radius:12px;padding:12px 14px;backdrop-filter:blur(6px)}" ++
+        ".st b{display:block;font-size:1.35rem;font-variant-numeric:tabular-nums;font-weight:600}" ++
+        ".st span{font-size:.62rem;color:#7d8590;text-transform:uppercase;letter-spacing:.08em}" ++
+        ".bar{display:flex;gap:6px;margin:10px 0;flex-wrap:wrap}" ++
+        ".btn{font:inherit;font-size:.8rem;font-weight:500;color:#e6e6e6;background:#14161a;" ++
+        "border:1px solid #2a2f37;border-radius:8px;padding:.45rem .85rem;cursor:pointer;" ++
+        "transition:background .08s,border-color .08s,transform .05s}" ++
+        ".btn:hover{background:#1d2026;border-color:#3d434d}.btn:active{transform:scale(.95)}" ++
+        ".btn.on{background:#e6e6e6;color:#07080a;border-color:#e6e6e6}" ++
+        ".btn.danger{background:#2a0f0a;border-color:#7c2d12;color:#fdba74}" ++
+        ".btn.danger:hover{background:#3b140c;border-color:#f97316}" ++
+        ".btn.nuke{background:#3b0d0d;border-color:#b91c1c;color:#fecaca;font-weight:600}" ++
+        ".btn.nuke:hover{background:#561010;border-color:#ef4444}" ++
+        "#log{background:rgba(12,13,16,.82);border:1px solid #23272e;border-radius:12px;padding:8px 10px;" ++
+        "font:11px/1.55 ui-monospace,Menlo,monospace;height:260px;overflow:hidden}" ++
+        ".ln.k{color:#ff7b6b}.ln.u{color:#6ee7a8}.ln.m{color:#7d8590}" ++
         "</style>" ++
-        "<div class=\"arena\"><h1>Swarm Arena</h1>" ++
-        "<p>600 live swarmrt processes under one supervisor. Click a cell to kill it &mdash; watch it come back.</p>" ++
-        "<div class=\"stats\">" ++
-        stat("processes", "{{}}") ++ stat("msgs / sec", "{{}}") ++
-        stat("crashes", "{{}}") ++ stat("restarts", "{{}}") ++ stat("mailbox drops", "{{}}") ++
-        "</div>" ++
-        "<div class=\"bar\">" ++
-        "<button sw-click=\"burst\" sw-value-n=\"1\">calm</button>" ++
-        "<button sw-click=\"burst\" sw-value-n=\"5\">busy</button>" ++
-        "<button sw-click=\"burst\" sw-value-n=\"20\">storm</button>" ++
-        "<button sw-click=\"chaos\" sw-value-k=\"60\" style=\"margin-left:auto\">kill 10%</button>" ++
-        "</div>" ++
-        "<div id=\"grid\" sw-stream sw-click-key=\"kill\"></div></div>",
-        [map_get(assigns, 'procs'), map_get(assigns, 'rate'),
-         map_get(assigns, 'crashes'), map_get(assigns, 'restarts'),
-         map_get(assigns, 'drops')])
+        "<canvas id=\"stage\" sw-keep></canvas>" ++
+        "<div class=\"hud\"><h1>Swarm Arena</h1>" ++
+        "<p>600 real swarmrt processes under one supervisor. Click a cell to kill it.</p></div>" ++
+        "<div class=\"side\"><div class=\"stats\">" ++
+        stat("s-proc", "processes") ++ stat("s-msgs", "msgs / sec") ++
+        stat("s-tot", "total msgs") ++ stat("s-ms", "avg respawn") ++
+        stat("s-crash", "crashes") ++ stat("s-rest", "restarts") ++
+        "</div><div class=\"bar\">" ++
+        "<button class=\"btn\" data-burst=\"1\">calm</button>" ++
+        "<button class=\"btn\" data-burst=\"5\">busy</button>" ++
+        "<button class=\"btn\" data-burst=\"20\">storm</button>" ++
+        "<button class=\"btn danger\" data-kill=\"60\" style=\"margin-left:auto\">kill 10%</button>" ++
+        "<button class=\"btn nuke\" data-kill=\"300\">kill 50%</button></div>" ++
+        "<div id=\"log\" sw-keep></div></div>",
+        [])
 }
 
 fun handle_event(name, value, assigns) {
     if (name == "kill") {
         arena_send({'kill', to_int(map_get(value, 'key'))})
-        assigns
     } else { if (name == "burst") {
         arena_send({'burst', to_int(map_get(value, 'n'))})
-        assigns
     } else { if (name == "chaos") {
         arena_send({'kill_random', to_int(map_get(value, 'k'))})
-        assigns
     } else {
-        assigns
+        'noop'
     }}}
+    assigns
 }
 
+# A frame is already a finished JSON string — straight to the socket.
 fun handle_info(msg, assigns) {
-    tag = elem(msg, 0)
-    if (tag == 'tick') {
-        htmls = elem(msg, 1)
-        if (length(htmls) > 0) {
-            LiveView.stream_op(assigns, %{t: "s", id: "grid", op: "upsert", htmls: htmls})
-        } else { 'noop' }
-        a1 = LiveView.assign(assigns, 'rate', elem(msg, 2))
-        a2 = LiveView.assign(a1, 'procs', elem(msg, 3))
-        a3 = LiveView.assign(a2, 'crashes', elem(msg, 4))
-        a4 = LiveView.assign(a3, 'restarts', elem(msg, 5))
-        LiveView.assign(a4, 'drops', elem(msg, 6))
-    } else { if (tag == 'cells') {
-        LiveView.stream_op(assigns, %{t: "s", id: "grid", op: "upsert", htmls: elem(msg, 1)})
-        assigns
-    } else {
-        assigns
-    }}
+    if (elem(msg, 0) == 'frame') {
+        conn = map_get(assigns, '_conn')
+        if (conn == nil) { 'noop' } else { ws_send(conn, elem(msg, 1)) }
+    } else { 'noop' }
+    assigns
 }
 
 fun main() {
@@ -244,9 +291,11 @@ fun main() {
     ets_put(tab, 'burst', 5)
     sup = dyn_supervisor(1000000, 1)
     spawn_agents(sup, tab, 0)
+    spawn(driver_loop(tab))
     register('arena', spawn(arena_loop(tab)))
     LiveView.start(4007, %{
         title: "Swarm Arena",
+        js: ArenaJs.js(),
         mount: mount,
         render: render,
         handle_event: handle_event,

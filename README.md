@@ -27,10 +27,13 @@ src/chat.sw       :4003  PubSub broadcast across all sessions
 src/feed.sw       :4004  stream ops + presence + a sw-js JS command
 src/showcase.sw   :4005  every UI component on one live page
 src/canvas.sw     :4006  shared multiplayer canvas — ink, live cursors, presence, history
-src/arena.sw      :4007  600 supervised processes as a live heat grid — click to kill, watch restarts
+src/arena.sw      :4007  Swarm Arena — 600 supervised processes on a canvas: real message comets, kills, supervisor respawns (add ?slow=8 for slow-mo)
+src/arena.js      the Arena's canvas renderer; src/ArenaJs.sw is generated from it (python3 scripts/embed_js.py src/arena.js ArenaJs src/ArenaJs.sw)
 ```
 
 > **Note:** until swarmrt fixes [skyblanket/swarmrt#20](https://github.com/skyblanket/swarmrt/issues/20), run servers as `(trap '' PIPE; ./bin/canvas)` so a client disconnecting mid-send can't kill the node.
+
+**Per-view scripts:** a view map may set `js:` (a string). It is added to the page after the client and can call `window.swSend(name, value)` (-> `handle_event`) and register `window.SwEvents[name] = fn` for `{t:"ev", n:name, d:data}` frames that the server `ws_send`s. Mark client-owned elements (a canvas, a log) `sw-keep` so DOM patching leaves them alone.
 
 ## Authoring a view
 
