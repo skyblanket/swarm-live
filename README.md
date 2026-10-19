@@ -28,7 +28,8 @@ src/feed.sw       :4004  stream ops + presence + a sw-js JS command
 src/showcase.sw   :4005  every UI component on one live page
 src/canvas.sw     :4006  shared multiplayer canvas — ink, live cursors, presence, history
 src/arena.sw      :4007  Swarm Arena — 600 supervised processes on a canvas: real message comets, kills, supervisor respawns (add ?slow=8 for slow-mo)
-src/arena.js      the Arena's canvas renderer; src/ArenaJs.sw is generated from it (python3 scripts/embed_js.py src/arena.js ArenaJs src/ArenaJs.sw)
+src/flock.sw      :4008  Flock — 800 boids, each a swarmrt process; every visitor is a predator (hold to attract); live flock-order metric
+src/arena.js      the Arena's canvas renderer; src/ArenaJs.sw is generated from it (python3 scripts/embed_js.py src/arena.js ArenaJs src/ArenaJs.sw); same for src/flock.js -> src/FlockJs.sw
 ```
 
 > **Note:** until swarmrt fixes [skyblanket/swarmrt#20](https://github.com/skyblanket/swarmrt/issues/20), run servers as `(trap '' PIPE; ./bin/canvas)` so a client disconnecting mid-send can't kill the node.
