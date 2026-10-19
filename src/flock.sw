@@ -32,6 +32,22 @@ let tick_ms = 33
 let k_state = 1000
 let k_grid = 100000
 
+# swarmrt#58: one rwlock per ETS table makes a shared hot table scale
+# backwards across schedulers. Shard int keys over 16 tables (ets_new ids are
+# consecutive: tab .. tab+15 hold data, tab+16 holds the few control keys).
+fun tget(tab, k) { ets_get(tab + k % 16, k) }
+fun tput(tab, k, v) { ets_put(tab + k % 16, k, v) }
+
+# creates `more` further tables right after `base`; returns base. ets ids are
+# handed out sequentially, so base .. base+16 is one contiguous block.
+fun make_tables(base, more) {
+    if (more <= 0) { base }
+    else {
+        id = ets_new()
+        if (id == base + (17 - more)) { make_tables(base, more - 1) } else { panic("ets ids not contiguous") }
+    }
+}
+
 fun num(x) { if (x == nil) { 0 } else { x } }
 fun list_or_empty(x) { if (x == nil) { [] } else { x } }
 
@@ -48,7 +64,7 @@ fun wrap(v, size) {
 # Boids
 # ------------------------------------------------------------
 fun boid(i, tab) {
-    ets_put(tab, i, self())
+    tput(tab, i, self())
     boid_loop(i, tab, 0)
 }
 
@@ -74,28 +90,26 @@ fun cell_keys(cx, cy) {
      k_grid + ((cy + 1) % grid_y) * grid_x + ((cx + 1) % grid_x)]
 }
 
+# grid cells hold the boids' states themselves ({j, x, y, vx, vy}), published by
+# the coordinator each tick, so a boid does 9 ETS reads instead of ~40.
 # acc = {count, sum vx, sum vy, sum dx, sum dy, sep x, sep y}
-fun scan_idxs(tab, i, x, y, idxs, acc) {
-    if (length(idxs) == 0) { acc }
+fun scan_idxs(i, x, y, entries, acc) {
+    if (length(entries) == 0) { acc }
     else {
-        j = hd(idxs)
-        if (j == i) { scan_idxs(tab, i, x, y, tl(idxs), acc) }
+        s = hd(entries)
+        if (elem(s, 0) == i) { scan_idxs(i, x, y, tl(entries), acc) }
         else {
-            s = ets_get(tab, k_state + j)
-            if (s == nil) { scan_idxs(tab, i, x, y, tl(idxs), acc) }
-            else {
-                dx = wd(elem(s, 0) - x, world_w)
-                dy = wd(elem(s, 1) - y, world_h)
-                d2 = dx * dx + dy * dy
-                if (d2 < 3600.0) {
-                    sx = if (d2 < 700.0 && d2 > 0.01) { elem(acc, 5) - dx / d2 } else { elem(acc, 5) }
-                    sy = if (d2 < 700.0 && d2 > 0.01) { elem(acc, 6) - dy / d2 } else { elem(acc, 6) }
-                    scan_idxs(tab, i, x, y, tl(idxs),
-                        {elem(acc, 0) + 1, elem(acc, 1) + elem(s, 2), elem(acc, 2) + elem(s, 3),
-                         elem(acc, 3) + dx, elem(acc, 4) + dy, sx, sy})
-                } else {
-                    scan_idxs(tab, i, x, y, tl(idxs), acc)
-                }
+            dx = wd(elem(s, 1) - x, world_w)
+            dy = wd(elem(s, 2) - y, world_h)
+            d2 = dx * dx + dy * dy
+            if (d2 < 3600.0) {
+                sx = if (d2 < 700.0 && d2 > 0.01) { elem(acc, 5) - dx / d2 } else { elem(acc, 5) }
+                sy = if (d2 < 700.0 && d2 > 0.01) { elem(acc, 6) - dy / d2 } else { elem(acc, 6) }
+                scan_idxs(i, x, y, tl(entries),
+                    {elem(acc, 0) + 1, elem(acc, 1) + elem(s, 3), elem(acc, 2) + elem(s, 4),
+                     elem(acc, 3) + dx, elem(acc, 4) + dy, sx, sy})
+            } else {
+                scan_idxs(i, x, y, tl(entries), acc)
             }
         }
     }
@@ -104,7 +118,7 @@ fun scan_idxs(tab, i, x, y, idxs, acc) {
 fun scan_cells(tab, i, x, y, keys, acc) {
     if (length(keys) == 0) { acc }
     else {
-        acc2 = scan_idxs(tab, i, x, y, list_or_empty(ets_get(tab, hd(keys))), acc)
+        acc2 = scan_idxs(i, x, y, list_or_empty(tget(tab, hd(keys))), acc)
         scan_cells(tab, i, x, y, tl(keys), acc2)
     }
 }
@@ -140,7 +154,7 @@ fun pred_force(preds, x, y, fx, fy) {
 }
 
 fun step(i, tab, tick) {
-    s = ets_get(tab, k_state + i)
+    s = tget(tab, k_state + i)
     x = elem(s, 0)
     y = elem(s, 1)
     vx = elem(s, 2)
@@ -149,7 +163,7 @@ fun step(i, tab, tick) {
     cy = Math.floor(y / cell)
     acc = scan_cells(tab, i, x, y, cell_keys(cx, cy), {0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0})
     cnt = elem(acc, 0)
-    mode = num(ets_get(tab, 'mode'))
+    mode = num(ets_get(tab + 16, 'mode'))
 
     # the three flocking rules
     fc = if (cnt > 0) { to_float(cnt) } else { 1.0 }
@@ -166,21 +180,21 @@ fun step(i, tab, tick) {
     fx2 = if (mode == 2) { fx1 + jit * 0.7 } else { fx1 }
     fy2 = if (mode == 2) { fy1 + jit2 * 0.7 } else { fy1 }
 
-    pf = pred_force(list_or_empty(ets_get(tab, 'preds')), x, y, fx2, fy2)
+    pf = pred_force(list_or_empty(ets_get(tab + 16, 'preds')), x, y, fx2, fy2)
     nvx0 = vx + elem(pf, 0)
     nvy0 = vy + elem(pf, 1)
     sp = Math.sqrt(nvx0 * nvx0 + nvy0 * nvy0)
     k = if (sp > 4.4) { 4.4 / sp } else { if (sp < 2.2 && sp > 0.01) { 2.2 / sp } else { 1.0 } }
     nvx = nvx0 * k
     nvy = nvy0 * k
-    ets_put(tab, k_state + i, {wrap(x + nvx, world_w), wrap(y + nvy, world_h), nvx, nvy})
+    tput(tab, k_state + i, {wrap(x + nvx, world_w), wrap(y + nvy, world_h), nvx, nvy})
 }
 
 fun spawn_boids(sup, tab, i) {
     if (i >= n_boids) { 'ok' }
     else {
         ang = to_float((i * 7919) % 628) / 100.0
-        ets_put(tab, k_state + i, {to_float((i * 104729) % 1600), to_float((i * 7907) % 900),
+        tput(tab, k_state + i, {to_float((i * 104729) % 1600), to_float((i * 7907) % 900),
                                    Math.cos(ang) * 3.0, Math.sin(ang) * 3.0})
         sup_start_child(sup, {nil, fun() { boid(i, tab) }, 'permanent'})
         spawn_boids(sup, tab, i + 1)
@@ -192,7 +206,7 @@ fun spawn_boids(sup, tab, i) {
 # ------------------------------------------------------------
 fun clear_grid(tab, c) {
     if (c >= grid_x * grid_y) { 'ok' }
-    else { ets_put(tab, k_grid + c, [])  clear_grid(tab, c + 1) }
+    else { tput(tab, k_grid + c, [])  clear_grid(tab, c + 1) }
 }
 
 # bin every boid into its grid cell; accumulate order statistics.
@@ -200,9 +214,9 @@ fun clear_grid(tab, c) {
 fun bin(tab, j, svx, svy, ssp) {
     if (j >= n_boids) { {svx, svy, ssp} }
     else {
-        s = ets_get(tab, k_state + j)
+        s = tget(tab, k_state + j)
         c = (Math.floor(elem(s, 1) / cell) % grid_y) * grid_x + (Math.floor(elem(s, 0) / cell) % grid_x)
-        ets_put(tab, k_grid + c, [j | list_or_empty(ets_get(tab, k_grid + c))])
+        tput(tab, k_grid + c, [{j, elem(s, 0), elem(s, 1), elem(s, 2), elem(s, 3)} | list_or_empty(tget(tab, k_grid + c))])
         bin(tab, j + 1, svx + elem(s, 2), svy + elem(s, 3),
             ssp + Math.sqrt(elem(s, 2) * elem(s, 2) + elem(s, 3) * elem(s, 3)))
     }
@@ -211,7 +225,7 @@ fun bin(tab, j, svx, svy, ssp) {
 fun poke(tab, j) {
     if (j >= n_boids) { 'ok' }
     else {
-        pid = ets_get(tab, j)
+        pid = tget(tab, j)
         if (pid == nil) { 'skip' } else { send(pid, {'tick'}) }
         poke(tab, j + 1)
     }
@@ -221,7 +235,7 @@ fun poke(tab, j) {
 fun positions(tab, j, acc) {
     if (j < 0) { acc }
     else {
-        s = ets_get(tab, k_state + j)
+        s = tget(tab, k_state + j)
         positions(tab, j - 1, [Math.round(elem(s, 0)), Math.round(elem(s, 1)) | acc])
     }
 }
@@ -242,14 +256,14 @@ fun coordinator(tab, tick) {
     poke(tab, 0)
     sp = elem(st, 2)
     pol = if (sp > 0.01) { Math.sqrt(elem(st, 0) * elem(st, 0) + elem(st, 1) * elem(st, 1)) / sp } else { 0.0 }
-    preds = list_or_empty(ets_get(tab, 'preds'))
+    preds = list_or_empty(ets_get(tab + 16, 'preds'))
     LiveView.broadcast("flock", {'frame', json_encode(%{t: "ev", n: "frame", d: %{
         p: positions(tab, n_boids - 1, []),
         q: pred_json(preds, []),
         o: Math.round(pol * 1000),
         s: Math.round(sp / to_float(n_boids) * 100.0),
         n: n_boids,
-        m: num(ets_get(tab, 'mode'))
+        m: num(ets_get(tab + 16, 'mode'))
     }})})
     sleep(tick_ms)
     coordinator(tab, tick + 1)
@@ -266,7 +280,7 @@ fun inbox(tab, users) {
             publish(tab, u2)
             inbox(tab, u2)
         {'mode', m} ->
-            ets_put(tab, 'mode', m)
+            ets_put(tab + 16, 'mode', m)
             inbox(tab, users)
         {'blast', x, y} ->
             u2 = map_put(users, "blast-" ++ to_string(timestamp()), {x, y, 2, 20, timestamp() - 1000})
@@ -293,7 +307,7 @@ fun prune_keys(users, keys, now) {
 }
 
 fun publish(tab, users) {
-    ets_put(tab, 'preds', pred_list(users, map_keys(users), []))
+    ets_put(tab + 16, 'preds', pred_list(users, map_keys(users), []))
 }
 
 fun pred_list(users, keys, acc) {
@@ -395,9 +409,9 @@ fun handle_info(msg, assigns) {
 }
 
 fun main() {
-    tab = ets_new()
-    ets_put(tab, 'mode', 0)
-    ets_put(tab, 'preds', [])
+    tab = make_tables(ets_new(), 16)
+    ets_put(tab + 16, 'mode', 0)
+    ets_put(tab + 16, 'preds', [])
     sup = dyn_supervisor(1000000, 1)
     spawn_boids(sup, tab, 0)
     register('flock_in', spawn(inbox(tab, map_new())))

@@ -8,7 +8,11 @@ BINS := $(addprefix bin/,$(EXAMPLES))
 
 LIB_SOURCES := src/liveview.sw src/ui.sw src/client.sw src/ArenaJs.sw src/FlockJs.sw
 
-.PHONY: all clean
+.PHONY: all clean run-%
+
+# make run-flock  (builds, then runs with the swarmrt-issue workarounds; see scripts/run.sh)
+run-%: bin/%
+	./scripts/run.sh $*
 all: $(BINS)
 
 bin/%: src/%.sw $(LIB_SOURCES)
