@@ -542,7 +542,8 @@ fun session_loop(conn, routes, view, assigns, last_s, last_d) {
                 he = map_get(view, 'handle_event')
                 new_assigns = if (he == nil) { assigns }
                               else { he(map_get(msg, 'n'), map_get(msg, 'v'), assigns) }
-                push_update(conn, routes, view, new_assigns, last_s, last_d)
+                st = push_update(conn, view, new_assigns, last_s, last_d)
+                session_loop(conn, routes, view, new_assigns, elem(st, 0), elem(st, 1))
             }}
 
         {'ws_close', _c} ->
@@ -554,7 +555,9 @@ fun session_loop(conn, routes, view, assigns, last_s, last_d) {
             if (hi == nil) {
                 session_loop(conn, routes, view, assigns, last_s, last_d)
             } else {
-                push_update(conn, routes, view, hi(other, assigns), last_s, last_d)
+                new_assigns = hi(other, assigns)
+                st = push_update(conn, view, new_assigns, last_s, last_d)
+                session_loop(conn, routes, view, new_assigns, elem(st, 0), elem(st, 1))
             }
 
         after 90000 {
@@ -572,7 +575,12 @@ fun session_loop(conn, routes, view, assigns, last_s, last_d) {
 # itself changed (a conditional flipped, a list grew), fall back to a
 # fresh mount — correct, just less frugal; Phase 2 makes structural
 # change incremental too.
-fun push_update(conn, routes, view, assigns, last_s, last_d) {
+#
+# Returns {statics, dstrings} for the caller to loop with. It must NOT
+# call session_loop itself: mutual tail calls aren't TCO'd, so every
+# event would grow the stack until it overflowed (high-rate events like
+# pointer moves hit that within seconds). session_loop self-tail-calls.
+fun push_update(conn, view, assigns, last_s, last_d) {
     rendered = render_view(view, assigns)
     statics = map_get(rendered, 's')
     dstrings = dyn_strings(map_get(rendered, 'd'), [])
@@ -586,5 +594,5 @@ fun push_update(conn, routes, view, assigns, last_s, last_d) {
             'noop'
         }
     }
-    session_loop(conn, routes, view, assigns, statics, dstrings)
+    {statics, dstrings}
 }
