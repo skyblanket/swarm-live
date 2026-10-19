@@ -88,13 +88,16 @@ fun js() {
     "      g.moveTo(s[0]*cv.width,s[1]*cv.height);\n" ++
     "      g.lineTo(s[2]*cv.width,s[3]*cv.height);g.stroke()});\n" ++
     "    return}\n" ++
-    "  /* upsert: replace the sw-key'd child in place, else append. */\n" ++
+    "  /* upsert: replace each sw-key'd child in place, else append.\n" ++
+    "     Takes m.html (one) or m.htmls (a batch). */\n" ++
     "  if(m.op==='upsert'){\n" ++
-    "    var t2=document.createElement('div');t2.innerHTML=m.html;\n" ++
-    "    var nn=t2.firstChild;if(!nn)return;\n" ++
-    "    nn._t=Date.now();\n" ++
-    "    var old=c.querySelector('[sw-key=\"'+m.key+'\"]');\n" ++
-    "    if(old)c.replaceChild(nn,old);else c.appendChild(nn);\n" ++
+    "    var hs=m.htmls||[m.html];\n" ++
+    "    hs.forEach(function(h){\n" ++
+    "      var t2=document.createElement('div');t2.innerHTML=h;\n" ++
+    "      var nn=t2.firstChild;if(!nn)return;\n" ++
+    "      nn._t=Date.now();\n" ++
+    "      var old=c.querySelector('[sw-key=\"'+nn.getAttribute('sw-key')+'\"]');\n" ++
+    "      if(old)c.replaceChild(nn,old);else c.appendChild(nn)});\n" ++
     "    return}\n" ++
     "  if(m.op==='reset'){c.innerHTML='';return}\n" ++
     "  if(m.op==='delete'){\n" ++
@@ -248,6 +251,12 @@ fun js() {
     "      send(el.getAttribute('sw-scroll'),\n" ++
     "        {scrollTop:el.scrollTop,scrollLeft:el.scrollLeft,\n" ++
     "         scrollHeight:el.scrollHeight,clientHeight:el.clientHeight})})});\n" ++
+    "  /* sw-click-key=\"evt\": one delegated click handler on a container;\n" ++
+    "     sends {key} of the nearest [sw-key] ancestor of the click. */\n" ++
+    "  document.querySelectorAll('[sw-click-key]').forEach(function(el){\n" ++
+    "    el.onclick=function(e){\n" ++
+    "      var k=e.target.closest&&e.target.closest('[sw-key]');\n" ++
+    "      if(k&&el.contains(k))send(el.getAttribute('sw-click-key'),{key:k.getAttribute('sw-key')})}});\n" ++
     "  /* sw-pointer=\"evt\": normalized (0..1) pointer events, throttled.\n" ++
     "     Sends {k:'down'|'draw'|'move'|'up', x, y}. */\n" ++
     "  document.querySelectorAll('[sw-pointer]').forEach(function(el){\n" ++

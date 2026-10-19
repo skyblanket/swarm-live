@@ -27,7 +27,10 @@ src/chat.sw       :4003  PubSub broadcast across all sessions
 src/feed.sw       :4004  stream ops + presence + a sw-js JS command
 src/showcase.sw   :4005  every UI component on one live page
 src/canvas.sw     :4006  shared multiplayer canvas — ink, live cursors, presence, history
+src/arena.sw      :4007  600 supervised processes as a live heat grid — click to kill, watch restarts
 ```
+
+> **Note:** until swarmrt fixes [skyblanket/swarmrt#20](https://github.com/skyblanket/swarmrt/issues/20), run servers as `(trap '' PIPE; ./bin/canvas)` so a client disconnecting mid-send can't kill the node.
 
 ## Authoring a view
 
