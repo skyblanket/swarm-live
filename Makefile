@@ -1,5 +1,5 @@
 # swarm-live — LiveView framework + swarmUI for swarmrt
-# Requires sibling /Users/sky/swarmrt with bin/swc + bin/libswarmrt.a built.
+# Requires sibling ../swarmrt with bin/swc + bin/libswarmrt.a built.
 
 SWC := ../swarmrt/bin/swc
 

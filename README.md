@@ -6,7 +6,7 @@ The server holds UI state; the browser is a thin renderer. After the first paint
 
 ## Build
 
-(needs sibling `/Users/sky/swarmrt` with `bin/swc` + `bin/libswarmrt.a` built)
+(needs sibling `../swarmrt` with `bin/swc` + `bin/libswarmrt.a` built)
 
 ```sh
 make            # builds bin/counter ... bin/showcase
