@@ -3,7 +3,7 @@
 
 SWC := ../swarmrt/bin/swc
 
-EXAMPLES := counter todo router chat feed showcase
+EXAMPLES := counter todo router chat feed showcase canvas
 BINS := $(addprefix bin/,$(EXAMPLES))
 
 LIB_SOURCES := src/liveview.sw src/ui.sw src/client.sw
