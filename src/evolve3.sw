@@ -32,11 +32,12 @@ import Evolve3Js
 import Math
 import Std
 
-let max_slots = 110
-let pop_cap = 100
+let max_slots = 150
+let pop_cap = 140
+let WS = 1.6
 let nmax = 24
 let n_out = 5
-let n_sens = 18
+let n_sens = 22
 let n_loci = 19
 let cmax = 48
 let tick_ms = 30
@@ -483,7 +484,23 @@ fun founder_genome() {
 # ------------------------------------------------------------
 # World: plants grow in drifting patches, corpses become meat, two predators
 # ------------------------------------------------------------
-fun obstacles() { [[0.28, 0.32, 0.06], [0.72, 0.30, 0.05], [0.52, 0.70, 0.07], [0.15, 0.78, 0.05], [0.86, 0.82, 0.05]] }
+# a rock reef in one corner plus a few lone rocks
+fun obstacles() { [[1.20, 1.18, 0.07], [1.33, 1.28, 0.06], [1.17, 1.36, 0.05], [1.40, 1.12, 0.045], [1.29, 1.44, 0.045],
+                   [0.40, 0.45, 0.06], [1.10, 0.38, 0.05], [0.30, 1.30, 0.05]] }
+
+# toxic vents: standing in one burns health
+fun vents() { [[0.80, 0.80, 0.12], [1.36, 0.26, 0.10], [0.20, 0.62, 0.09]] }
+
+fun toxicity(x, y, lst) {
+    if (length(lst) == 0) { 0.0 }
+    else {
+        v = hd(lst)
+        dx = x - hd(v)
+        dy = y - nth(v, 1)
+        d = Math.sqrt(dx * dx + dy * dy)
+        fmax(if (d < nth(v, 2)) { 1.0 - d / nth(v, 2) * 0.6 } else { 0.0 }, toxicity(x, y, tl(lst)))
+    }
+}
 
 fun in_obstacle(x, y, obs) {
     if (length(obs) == 0) { false }
@@ -496,37 +513,45 @@ fun in_obstacle(x, y, obs) {
     }
 }
 
-fun clampw(v) { clampf(v, 0.02, 0.98) }
+fun clampw(v) { clampf(v, 0.02, WS - 0.02) }
 
 fun patch_center(k, t) {
-    a = to_float(k) * 1.0472 + to_float(t) * 0.00004
-    {0.5 + 0.30 * Math.cos(a), 0.5 + 0.30 * Math.sin(a)}
+    a = to_float(k) * 1.0472 + to_float(t) * 0.00002
+    {0.5 * WS + 0.31 * WS * Math.cos(a), 0.5 * WS + 0.31 * WS * Math.sin(a)}
 }
 
 # half the algae grows anywhere, half in wide drifting patches: spinning on the spot does not pay
 fun plant_pos(t, tries) {
     c = patch_center(rndi(6), t)
-    anywhere = rndf() < 0.5
-    x = if (anywhere) { 0.04 + rndf() * 0.92 } else { clampw(elem(c, 0) + gauss() * 0.13) }
-    y = if (anywhere) { 0.04 + rndf() * 0.92 } else { clampw(elem(c, 1) + gauss() * 0.13) }
+    anywhere = rndf() < 0.35
+    x = if (anywhere) { 0.04 + rndf() * (WS - 0.08) } else { clampw(elem(c, 0) + gauss() * 0.15) }
+    y = if (anywhere) { 0.04 + rndf() * (WS - 0.08) } else { clampw(elem(c, 1) + gauss() * 0.15) }
     if (tries <= 0 || in_obstacle(x, y, obstacles()) == false) { [x, y, 0] } else { plant_pos(t, tries - 1) }
 }
 
 fun init_plants(k, t) { if (k <= 0) { [] } else { [plant_pos(t, 10) | init_plants(k - 1, t)] } }
 
 fun free_pos(tries) {
-    x = 0.06 + rndf() * 0.88
-    y = 0.06 + rndf() * 0.88
-    if (tries <= 0 || in_obstacle(x, y, obstacles()) == false) { [x, y] } else { free_pos(tries - 1) }
+    x = 0.06 + rndf() * (WS - 0.12)
+    y = 0.06 + rndf() * (WS - 0.12)
+    if (tries <= 0 || (in_obstacle(x, y, obstacles()) == false && toxicity(x, y, vents()) == 0.0)) { [x, y] } else { free_pos(tries - 1) }
 }
+
+# poison algae: mostly around the vents, some anywhere
+fun poison_pos() {
+    v = nth(vents(), rndi(3))
+    if (rndf() < 0.7) { [clampw(hd(v) + gauss() * nth(v, 2) * 1.6), clampw(nth(v, 1) + gauss() * nth(v, 2) * 1.6)] }
+    else { [0.04 + rndf() * (WS - 0.08), 0.04 + rndf() * (WS - 0.08)] }
+}
+fun init_poison(k) { if (k <= 0) { [] } else { [poison_pos() | init_poison(k - 1)] } }
 
 fun slots(k) { if (k >= max_slots) { [] } else { [k | slots(k + 1)] } }
 
 fun new_world() {
-    %{crs: [], plants: init_plants(72, 0), meat: [],
+    %{crs: [], plants: init_plants(150, 0), meat: [], poison: init_poison(30),
       preds: [[0.9, 0.9, 0, 200, 0.0 - 1.0, 0.0], [0.1, 0.1, 0, 300, 1.0, 0.0]],
       free: slots(0), next_id: 1, tick: 0, init: 0,
-      b_sex: 0, b_bud: 0, b_imm: 0, d_starve: 0, d_pred: 0, d_eaten: 0, d_old: 0,
+      b_sex: 0, b_bud: 0, b_imm: 0, d_starve: 0, d_pred: 0, d_eaten: 0, d_old: 0, d_toxic: 0,
       maxgen: 0, sps: [], sp_next: 1, hof: [], evs: [], ck_tick: 0, ck_note: "", pred_on: 1, hist: []}
 }
 
@@ -607,9 +632,20 @@ fun nearest_pred(lst, x, y, best) {
 }
 
 fun wall_t(x, y, dx, dy) {
-    tx = if (dx > 0.0) { (1.0 - x) / dx } else { if (dx < 0.0) { (0.0 - x) / dx } else { 99.0 } }
-    ty = if (dy > 0.0) { (1.0 - y) / dy } else { if (dy < 0.0) { (0.0 - y) / dy } else { 99.0 } }
+    tx = if (dx > 0.0) { (WS - x) / dx } else { if (dx < 0.0) { (0.0 - x) / dx } else { 99.0 } }
+    ty = if (dy > 0.0) { (WS - y) / dy } else { if (dy < 0.0) { (0.0 - y) / dy } else { 99.0 } }
     fmin(tx, ty)
+}
+
+fun nearest_poison(lst, x, y, best) {
+    if (length(lst) == 0) { best }
+    else {
+        it = hd(lst)
+        dx = hd(it) - x
+        dy = nth(it, 1) - y
+        d = Math.sqrt(dx * dx + dy * dy)
+        nearest_poison(tl(lst), x, y, if (best == nil || d < hd(best)) { [d, dx, dy] } else { best })
+    }
 }
 
 fun see(item, sight, hx, hy) {
@@ -635,11 +671,13 @@ fun senses(s, c) {
     sz = if (seen) { nth(g(o, 'ph'), 0) - nth(ph, 0) } else { 0.0 }
     osig = if (seen) { g(o, 'sig') } else { 0.0 }
     hn = nearest_hunter(g(s, 'crs'), c, power(c), nil)
+    po = see(nearest_poison(g(s, 'poison'), x, y, nil), sight, hx, hy)
     pv = see(hn, sight * 1.3, hx, hy)
     threat = if (hn == nil || hd(hn) > sight * 1.3) { 0.0 } else { if (g(nth(hn, 3), 'bite') == 1) { 1.0 } else { 0.5 } }
     wa = 1.0 - fmin(wall_t(x, y, hx, hy), 0.25) / 0.25
     [1.0, hd(pl), nth(pl, 1), hd(mt), nth(mt, 1), hd(cv), nth(cv, 1), kin, sz, osig,
-     hd(pv), nth(pv, 1), threat, wa, g(c, 'e') / 100.0, g(c, 'h') / 100.0, if (g(c, 'pain') > 0) { 1.0 } else { 0.0 }, elem(sc, 1)]
+     hd(pv), nth(pv, 1), threat, wa, g(c, 'e') / 100.0, g(c, 'h') / 100.0, if (g(c, 'pain') > 0) { 1.0 } else { 0.0 }, elem(sc, 1),
+     hd(po), nth(po, 1), toxicity(x, y, vents()), toxicity(x + hx * 0.09, y + hy * 0.09, vents())]
 }
 
 # ------------------------------------------------------------
@@ -770,17 +808,31 @@ fun eat_meat(lst, c, acc, got) {
     }
 }
 
+fun eat_poison(lst, c, acc, hit) {
+    if (length(lst) == 0) { {acc, hit} }
+    else {
+        it = hd(lst)
+        dx = hd(it) - g(c, 'x')
+        dy = nth(it, 1) - g(c, 'y')
+        r = 0.022 + 0.01 * nth(g(c, 'ph'), 0)
+        if (hit == 0 && dx * dx + dy * dy < r * r) { eat_poison(tl(lst), c, [poison_pos() | acc], 1) }
+        else { eat_poison(tl(lst), c, [it | acc], hit) }
+    }
+}
+
 # plants feed herbivores best, meat feeds carnivores best (the diet gene)
 fun feed_all(s, crs, acc) {
     if (length(crs) == 0) { p(s, 'crs', acc) }
     else {
         c = hd(crs)
         diet = nth(g(c, 'ph'), 5)
+        q = eat_poison(g(s, 'poison'), c, [], 0)
         f = eat_plants(g(s, 'plants'), c, g(s, 'tick'), [], 0)
         m = eat_meat(g(s, 'meat'), c, [], 0.0)
         gain = to_float(elem(f, 1)) * 26.0 * (1.0 - 0.75 * diet) + elem(m, 1) * (0.25 + 0.75 * diet)
-        c2 = if (gain > 0.0) { p(p(c, 'e', fmin(100.0, g(c, 'e') + gain)), 'eaten', g(c, 'eaten') + 1) } else { c }
-        feed_all(p(p(s, 'plants', elem(f, 0)), 'meat', elem(m, 0)), tl(crs), [c2 | acc])
+        c1 = if (gain > 0.0) { p(p(c, 'e', fmin(100.0, g(c, 'e') + gain)), 'eaten', g(c, 'eaten') + 1) } else { c }
+        c2 = if (elem(q, 1) > 0) { p(p(p(p(c1, 'h', g(c1, 'h') - 24.0), 'e', g(c1, 'e') - 4.0), 'pain', 10), 'killer', 0 - 2) } else { c1 }
+        feed_all(p(p(p(s, 'plants', elem(f, 0)), 'meat', elem(m, 0)), 'poison', elem(q, 0)), tl(crs), [c2 | acc])
     }
 }
 
@@ -877,7 +929,13 @@ fun vitals(c) {
     sz = nth(ph, 0)
     cost = 0.012 + 0.018 * sz * sz + 0.0016 * to_float(g(c, 'nn')) + 0.0004 * to_float(g(c, 'nc')) +
            0.006 * nth(ph, 2) + 0.005 * nth(ph, 3) + 0.02 * nth(ph, 4) + 0.03 * nth(ph, 11)
-    regen = g(c, 'e') > 40.0 && g(c, 'h') < 100.0
+    tox = toxicity(g(c, 'x'), g(c, 'y'), vents())
+    regen = g(c, 'e') > 40.0 && g(c, 'h') < 100.0 && tox == 0.0
+    c0 = if (tox > 0.0) { p(p(p(c, 'h', g(c, 'h') - 0.5 * tox), 'pain', 6), 'killer', 0 - 2) } else { c }
+    vitals2(c0, cost, regen)
+}
+
+fun vitals2(c, cost, regen) {
     p(p(p(p(p(p(p(c, 'e', g(c, 'e') - cost - (if (regen) { 0.02 } else { 0.0 })), 'h', if (regen) { fmin(100.0, g(c, 'h') + 0.05) } else { g(c, 'h') }),
       'age', g(c, 'age') + 1), 'cool', g(c, 'cool') - 1), 'acd', g(c, 'acd') - 1), 'pain', if (g(c, 'pain') > 0) { g(c, 'pain') - 1 } else { 0 }), 'sv', g(c, 'sv'))
 }
@@ -894,8 +952,8 @@ fun reap(s, crs, keep) {
         old = g(c, 'age') >= g(c, 'life')
         if (starved || slain || old) {
             kill_brain(c)
-            why = if (slain) { if (g(c, 'killer') > 0) { 6 } else { 5 } } else { if (starved) { 4 } else { 8 } }
-            key = if (why == 6) { 'd_eaten' } else { if (why == 5) { 'd_pred' } else { if (why == 4) { 'd_starve' } else { 'd_old' } } }
+            why = if (slain) { if (g(c, 'killer') > 0) { 6 } else { if (g(c, 'killer') == 0 - 2) { 13 } else { 5 } } } else { if (starved) { 4 } else { 8 } }
+            key = if (why == 6) { 'd_eaten' } else { if (why == 13) { 'd_toxic' } else { if (why == 5) { 'd_pred' } else { if (why == 4) { 'd_starve' } else { 'd_old' } } } }
             meat = [g(c, 'x'), g(c, 'y'), 14.0 + 26.0 * nth(g(c, 'ph'), 0), 520]
             s1 = p(p(p(p(s, key, g(s, key) + 1), 'free', [g(c, 'slot') | g(s, 'free')]), 'meat', [meat | g(s, 'meat')]),
                    'hof', hof_add(g(s, 'hof'), c))
@@ -1079,7 +1137,7 @@ fun save(s, name) {
     file_mkdir(ck_dir)
     data = %{v: 3, tick: g(s, 'tick'), maxgen: g(s, 'maxgen'), sp_next: g(s, 'sp_next'),
              b_sex: g(s, 'b_sex'), b_bud: g(s, 'b_bud'), b_imm: g(s, 'b_imm'),
-             d_starve: g(s, 'd_starve'), d_pred: g(s, 'd_pred'), d_eaten: g(s, 'd_eaten'), d_old: g(s, 'd_old'),
+             d_starve: g(s, 'd_starve'), d_pred: g(s, 'd_pred'), d_eaten: g(s, 'd_eaten'), d_old: g(s, 'd_old'), d_toxic: num(g(s, 'd_toxic')),
              sps: g(s, 'sps'), hof: g(s, 'hof'), hist: g(s, 'hist'), cr: ck_creatures(g(s, 'crs'))}
     path = ck_dir ++ "/" ++ name
     file_atomic_write(path, json_encode(data))
@@ -1116,9 +1174,9 @@ fun load(tab, world, s, name) {
         else {
             kill_all(g(s, 'crs'))
             w0 = new_world()
-            w1 = p(p(p(p(p(p(p(p(p(p(p(w0, 'tick', to_int(g(d, 'tick'))), 'maxgen', to_int(g(d, 'maxgen'))), 'sp_next', to_int(g(d, 'sp_next'))),
+            w1 = p(p(p(p(p(p(p(p(p(p(p(p(w0, 'tick', to_int(g(d, 'tick'))), 'maxgen', to_int(g(d, 'maxgen'))), 'sp_next', to_int(g(d, 'sp_next'))),
                   'b_sex', to_int(g(d, 'b_sex'))), 'b_bud', to_int(g(d, 'b_bud'))), 'b_imm', to_int(g(d, 'b_imm'))),
-                  'd_starve', to_int(g(d, 'd_starve'))), 'd_pred', to_int(g(d, 'd_pred'))), 'd_eaten', to_int(g(d, 'd_eaten'))), 'd_old', to_int(g(d, 'd_old'))),
+                  'd_starve', to_int(g(d, 'd_starve'))), 'd_pred', to_int(g(d, 'd_pred'))), 'd_eaten', to_int(g(d, 'd_eaten'))), 'd_old', to_int(g(d, 'd_old'))), 'd_toxic', to_int(num(g(d, 'd_toxic')))),
                   'sps', fix_sps(g(d, 'sps')))
             w2 = p(p(p(p(w1, 'hof', fix_hof(g(d, 'hof'))), 'init', 1), 'ck_note', "resumed " ++ name), 'hist', fix_hist(g(d, 'hist')))
             w3 = load_crs(tab, world, w2, g(d, 'cr'))
@@ -1171,7 +1229,7 @@ fun step(tab, s) {
     s3 = reap(p(p(p(s2, 'crs', []), 'meat', age_meat(g(s2, 'meat'))), 'plants', grow_plants(g(s2, 'plants'), g(s2, 'tick'))), map_vitals(g(s2, 'crs'), []), [])
     s4 = breed(tab, self(), s3, ids_of(g(s3, 'crs')))
     tick = g(s4, 'tick') + 1
-    s5 = if (length(g(s4, 'crs')) < 30 && tick % 30 == 0) { immigrate(tab, self(), s4) } else { s4 }
+    s5 = if (length(g(s4, 'crs')) < 40 && tick % 30 == 0) { immigrate(tab, self(), s4) } else { s4 }
     s6a = if (tick % 40 == 0) { species_step(s5) } else { s5 }
     s6 = if (tick % 500 == 0) { p(p(s6a, 'hist', cap([app(hist_sample(s6a, tick), flee_sample(tab, s6a)) | g(s6a, 'hist')], 400)), 'eaten_mark', g(s6a, 'd_eaten')) } else { s6a }
     s7 = if (tick - g(s6, 'ck_tick') >= 4000) { save(s6, "latest.json") } else { s6 }
@@ -1192,7 +1250,7 @@ fun r2(v) { Math.round(v * 100.0) }
 
 fun cr_row(c) {
     ph = g(c, 'ph')
-    [g(c, 'slot'), g(c, 'id'), g(c, 'sp'), Math.round(nth(ph, 6)), r3(g(c, 'x')), r3(g(c, 'y')), r3(g(c, 'hx')), r3(g(c, 'hy')),
+    [g(c, 'slot'), g(c, 'id'), g(c, 'sp'), Math.round(nth(ph, 6)), r3(g(c, 'x') / WS), r3(g(c, 'y') / WS), r3(g(c, 'hx')), r3(g(c, 'hy')),
      Math.round(g(c, 'e')), Math.round(g(c, 'h')), r2(nth(ph, 0)), r2(nth(ph, 1)), r2(nth(ph, 2)), r2(nth(ph, 3)), r2(nth(ph, 4)),
      r2(nth(ph, 5)), r2(nth(ph, 7)), r2(nth(ph, 8)), r2(nth(ph, 9)), r2(g(c, 'sig')), g(c, 'bite'), g(c, 'mate'),
      g(c, 'gen'), g(c, 'age'), g(c, 'kids'), g(c, 'kills'), g(c, 'nn'), g(c, 'nc'), g(c, 'pain'), Math.round(nth(ph, 11) * 1000.0)]
@@ -1202,11 +1260,14 @@ fun cr_rows(crs) { if (length(crs) == 0) { [] } else { [cr_row(hd(crs)) | cr_row
 
 fun plant_pts(lst) {
     if (length(lst) == 0) { [] }
-    else { it = hd(lst)  if (nth(it, 2) > 0) { plant_pts(tl(lst)) } else { [[r3(hd(it)), r3(nth(it, 1))] | plant_pts(tl(lst))] } }
+    else { it = hd(lst)  if (nth(it, 2) > 0) { plant_pts(tl(lst)) } else { [[r3(hd(it) / WS), r3(nth(it, 1) / WS)] | plant_pts(tl(lst))] } }
 }
-fun meat_pts(lst) { if (length(lst) == 0) { [] } else { it = hd(lst)  [[r3(hd(it)), r3(nth(it, 1)), Math.round(nth(it, 2))] | meat_pts(tl(lst))] } }
+fun meat_pts(lst) { if (length(lst) == 0) { [] } else { it = hd(lst)  [[r3(hd(it) / WS), r3(nth(it, 1) / WS), Math.round(nth(it, 2))] | meat_pts(tl(lst))] } }
 fun pred_pts(lst) { if (length(lst) == 0) { [] } else { pr = hd(lst)  [[r3(hd(pr)), r3(nth(pr, 1)), nth(pr, 2), nth(pr, 3)] | pred_pts(tl(lst))] } }
-fun obst_pts(lst) { if (length(lst) == 0) { [] } else { o = hd(lst)  [[r3(hd(o)), r3(nth(o, 1)), r3(nth(o, 2))] | obst_pts(tl(lst))] } }
+fun pois_pts(lst) { if (length(lst) == 0) { [] } else { it = hd(lst)  [[r3(hd(it) / WS), r3(nth(it, 1) / WS)] | pois_pts(tl(lst))] } }
+fun meadows(k, t) { if (k >= 6) { [] } else { c = patch_center(k, t)  [[r3(elem(c, 0) / WS), r3(elem(c, 1) / WS), r3(0.17 / WS)] | meadows(k + 1, t)] } }
+
+fun obst_pts(lst) { if (length(lst) == 0) { [] } else { o = hd(lst)  [[r3(hd(o) / WS), r3(nth(o, 1) / WS), r3(nth(o, 2) / WS)] | obst_pts(tl(lst))] } }
 
 fun sum_ph(crs, k, acc) { if (length(crs) == 0) { acc } else { sum_ph(tl(crs), k, acc + nth(g(hd(crs), 'ph'), k)) } }
 fun sum_k(crs, k, acc) { if (length(crs) == 0) { acc } else { sum_k(tl(crs), k, acc + to_float(g(hd(crs), k))) } }
@@ -1282,9 +1343,10 @@ fun frame(tab, s, tick, left, sp) {
                                         an: [length(g(g(sc, 'ha'), 'n')), length(g(g(sc, 'ha'), 'c'))], bn: [length(g(g(sc, 'hb'), 'n')), length(g(g(sc, 'hb'), 'c'))],
                                         mom: g(sc, 'mom'), dad: g(sc, 'dad')} } else { nil },
         plants: plant_pts(g(s, 'plants')), meat: meat_pts(g(s, 'meat')), preds: [],
-        obst: if (tick % 30 == 0) { obst_pts(obstacles()) } else { nil },
+        obst: if (tick % 30 == 0) { obst_pts(obstacles()) } else { nil }, vents: if (tick % 30 == 0) { obst_pts(vents()) } else { nil },
+        meadows: if (tick % 30 == 0) { meadows(0, tick) } else { nil }, poison: pois_pts(g(s, 'poison')), ws: WS,
         pop: length(crs), maxgen: g(s, 'maxgen'), b_sex: g(s, 'b_sex'), b_bud: g(s, 'b_bud'), b_imm: g(s, 'b_imm'),
-        d_starve: g(s, 'd_starve'), d_pred: g(s, 'd_pred'), d_eaten: g(s, 'd_eaten'), d_old: g(s, 'd_old'),
+        d_starve: g(s, 'd_starve'), d_pred: g(s, 'd_pred'), d_eaten: g(s, 'd_eaten'), d_old: g(s, 'd_old'), d_toxic: num(g(s, 'd_toxic')),
         sps: sp_rows(g(s, 'sps'), crs),
         mean: [r2(mean_ph(crs, 0)), r2(mean_ph(crs, 1)), r2(mean_ph(crs, 2)), r2(mean_ph(crs, 3)), r2(mean_ph(crs, 4)), r2(mean_ph(crs, 5)),
                r2(mean_ph(crs, 10)), Math.round(mean_ph(crs, 11) * 1000.0), r2(mean_k(crs, 'nn')), r2(mean_k(crs, 'nc'))],
@@ -1400,7 +1462,7 @@ fun render(assigns) {
         "<div class=\"card world\" id=\"arena\"><canvas id=\"arena-cv\" sw-keep></canvas>" ++
         "<div class=\"hud\"><div class=\"head\" id=\"head\" sw-keep><span class=\"big\">Generation &ndash;</span>waiting for the world</div>" ++
         "<div class=\"seg\"><button data-speed=\"1\">1x</button><button data-speed=\"2\">fast</button><button data-speed=\"3\">turbo</button></div></div>" ++
-        "<div class=\"legend\"><span><i style=\"background:#50e3c2\"></i>algae (food)</span><span><i style=\"background:#c4423f\"></i>meat (the dead)</span><span><i style=\"background:#ff4b3a\"></i>red spikes = meat-eating hunter</span>" ++
+        "<div class=\"legend\"><span><i style=\"background:#50e3c2\"></i>algae (food)</span><span><i style=\"background:#c4423f\"></i>meat (the dead)</span><span><i style=\"background:#b45cf0\"></i>poison algae &amp; toxic vents (hurt)</span><span><i style=\"background:#287850\"></i>algae meadow</span><span><i style=\"background:#ff4b3a\"></i>red spikes = meat-eating hunter</span>" ++
         "<span style=\"color:#6b6b6b\">microbe: spikes = attack &middot; grey plates = armor &middot; tail = speed &middot; eye = sight &middot; glow = signalling</span></div>" ++
         "<div class=\"tip\" id=\"tip\" sw-keep></div><div class=\"toast\" id=\"toast\" sw-keep></div></div>" ++
         "<div class=\"side\">" ++

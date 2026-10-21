@@ -27,14 +27,14 @@ fun js() {
     "  var ac = $('arena-cv'); if (!ac) return;\n" ++
     "  var ag = ac.getContext('2d'), bc = $('brain-cv'), bg = bc.getContext('2d'), gc = $('gene-cv'), gg = gc.getContext('2d');\n" ++
     "  var dpr = Math.min(2, window.devicePixelRatio || 1);\n" ++
-    "  var WP = 240;\n" ++
+    "  var WP = 320, WS = 1.6, vents = [], meadows = [], discs = {};\n" ++
     "  var wc = document.createElement('canvas'); wc.width = WP; wc.height = WP; var wg = wc.getContext('2d');\n" ++
     "  var bgc = null, last = null, net = null, kar = null, hist = [];\n" ++
     "  var tpsT = 0, tpsTick = 0, tps = 0, lastFrameT = 0, gap = 33, uiT = 0, toastT = 0, feedT = {};\n" ++
     "  var sprites = {}, spriteN = 0, AW = 0, AH = 0, view = { s: 1, ox: 0, oy: 0, k: 1 };\n" ++
     "  var pos = {}, predPos = [], hover = null, mouse = null, inspId = 0;\n" ++
     "  var SENS = ['bias', 'plant dir', 'plant near', 'meat dir', 'meat near', 'other dir', 'other near', 'kinship', 'its size', 'its signal',\n" ++
-    "    'hunter dir', 'hunter near', 'hunter biting', 'wall ahead', 'energy', 'health', 'pain', 'heard'];\n" ++
+    "    'hunter dir', 'hunter near', 'hunter biting', 'wall ahead', 'energy', 'health', 'pain', 'heard', 'poison dir', 'poison near', 'toxic here', 'toxic ahead'];\n" ++
     "  var OUTS = ['turn', 'thrust', 'bite', 'signal', 'mate'];\n" ++
     "  var LOCI = ['size', 'speed', 'armor', 'attack', 'sight', 'diet', 'hue', 'pattern', 'pattern', 'pattern', 'mutation', 'plasticity', 'rule A', 'rule B', 'rule C', 'rule D', 'mod base', 'fertility', 'choosiness'];\n" ++
     "  var LGROUP = [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 3, 3, 3, 3, 3, 3, 4, 4];\n" ++
@@ -82,6 +82,20 @@ fun js() {
     "      }\n" ++
     "    }\n" ++
     "    g.putImageData(img, 0, 0);\n" ++
+    "  }\n" ++
+    "\n" ++
+    "  /* a dithered pixel disc, used for algae meadows and toxic vents */\n" ++
+    "  function disc(rpx, col, dens, key) {\n" ++
+    "    if (discs[key]) return discs[key];\n" ++
+    "    var n = Math.ceil(rpx) * 2 + 2, cv = document.createElement('canvas'); cv.width = n; cv.height = n;\n" ++
+    "    var g = cv.getContext('2d'), c = n / 2;\n" ++
+    "    for (var y = 0; y < n; y++) for (var x = 0; x < n; x++) {\n" ++
+    "      var d = Math.sqrt((x + 0.5 - c) * (x + 0.5 - c) + (y + 0.5 - c) * (y + 0.5 - c)) / rpx;\n" ++
+    "      if (d > 1) continue;\n" ++
+    "      var p = dens * Math.pow(1 - d, 0.6);\n" ++
+    "      if (hash(x * 5 + key.length, y * 3) < p) { g.fillStyle = col; g.fillRect(x, y, 1, 1); }\n" ++
+    "    }\n" ++
+    "    return (discs[key] = cv);\n" ++
     "  }\n" ++
     "\n" ++
     "  /* ---------- microbe sprites: built from the genes, two animation frames, cached ----------\n" ++
@@ -174,6 +188,9 @@ fun js() {
     "  window.SwEvents.frame = function (d) {\n" ++
     "    var now = performance.now(), i;\n" ++
     "    if (d.obst && !bgc) makeBackground(d.obst);\n" ++
+    "    if (d.ws) WS = d.ws;\n" ++
+    "    if (d.vents) vents = d.vents;\n" ++
+    "    if (d.meadows) meadows = d.meadows;\n" ++
     "    if (last && d.tick < last.tick) { pos = {}; hist = []; }\n" ++
     "    if (lastFrameT) gap = gap * 0.8 + clamp(now - lastFrameT, 8, 400) * 0.2;\n" ++
     "    lastFrameT = now;\n" ++
@@ -225,9 +242,9 @@ fun js() {
     "  function tile(v, t, desc, col) { return '<div class=\"tile\"><div class=\"v\" style=\"color:' + col + '\">' + v + '</div><div class=\"t\">' + t + '</div><div class=\"d\">' + desc + '</div></div>'; }\n" ++
     "  function insights(d, nnb) {\n" ++
     "    var el = $('ins'); if (!el) return;\n" ++
-    "    var deaths = d.d_starve + d.d_pred + d.d_eaten + d.d_old, births = d.b_sex + d.b_bud, h = '';\n" ++
+    "    var deaths = d.d_starve + d.d_pred + d.d_eaten + d.d_old + (d.d_toxic || 0), births = d.b_sex + d.b_bud, h = '';\n" ++
     "    if (deaths < 20) h += tile('&ndash;', 'Too early to tell', 'Wait for a few dozen deaths.', '#8f8f8f');\n" ++
-    "    else if (d.d_eaten > d.d_starve) h += tile(pct(d.d_eaten, deaths) + '%', 'They eat each other', 'of all deaths: eaten by another creature. Only ' + pct(d.d_starve, deaths) + '% starved. Evolution made hunters.', '#ff6b6b');\n" ++
+    "    else if (d.d_eaten > d.d_starve) h += tile(pct(d.d_eaten, deaths) + '%', 'They eat each other', 'of all deaths: eaten by another creature. ' + pct(d.d_starve, deaths) + '% starved, ' + pct(d.d_toxic || 0, deaths) + '% died of toxins.', '#ff6b6b');\n" ++
     "    else h += tile(pct(d.d_starve, deaths) + '%', 'Hunger rules', 'of all deaths were starvation; ' + pct(d.d_eaten, deaths) + '% were eaten by other creatures.', '#f5a623');\n" ++
     "    if (births < 20) h += tile('&ndash;', 'Sex or cloning?', 'Not enough births yet.', '#8f8f8f');\n" ++
     "    else if (d.b_sex >= d.b_bud) h += tile(pct(d.b_sex, births) + '%', 'Sex beats cloning', 'of births had two parents. Budding (cloning yourself) is allowed but costs more.', '#ff78be');\n" ++
@@ -296,7 +313,7 @@ fun js() {
     "    if (code === 9) { txt = 'A new species split off: <b>#' + e[3] + '</b>'; col = hsl(e[2], 70, 55); }\n" ++
     "    else if (code === 10) { txt = 'Species #' + e[3] + ' died out'; col = '#555'; }\n" ++
     "    else if (code === 6) { txt = 'A creature was eaten by another one (generation ' + fmtc(e[3]) + ')'; col = '#ff5a5a'; }\n" ++
-    "    else if (code === 5) { txt = 'A predator caught a creature'; col = '#ff3b3b'; }\n" ++
+    "    else if (code === 13) { txt = 'Killed by toxins (vent or poison algae)'; col = '#b45cf0'; }\n" ++
     "    else if (code === 8 && e[5] >= 3) { txt = 'Died of old age, leaving ' + e[5] + ' children'; col = '#8f8f8f'; }\n" ++
     "    else if (code === 7 && e[4] === 1 && Math.random() < 0.15) { txt = 'Born of two parents, ' + e[5] + ' neurons'; col = '#ff78be'; }\n" ++
     "    else if (code === 11) { txt = 'Checkpoint saved (' + e[4] + ' genomes)'; col = '#50e3c2'; toast('Checkpoint saved'); }\n" ++
@@ -375,6 +392,24 @@ fun js() {
     "    var g = wg, d = last, i, f = Math.floor(now / 400) & 1;\n" ++
     "    if (bgc) g.drawImage(bgc, 0, 0); else { g.fillStyle = '#080a10'; g.fillRect(0, 0, WP, WP); }\n" ++
     "    if (!d) return;\n" ++
+    "    for (i = 0; i < meadows.length; i++) {\n" ++
+    "      var mr = meadows[i][2] / 1000 * WP, md = disc(mr, 'rgba(40,120,80,0.55)', 0.55, 'm' + Math.round(mr));\n" ++
+    "      g.drawImage(md, Math.round(meadows[i][0] / 1000 * WP - md.width / 2), Math.round(meadows[i][1] / 1000 * WP - md.height / 2));\n" ++
+    "    }\n" ++
+    "    for (i = 0; i < vents.length; i++) {\n" ++
+    "      var vr = vents[i][2] / 1000 * WP, vx = vents[i][0] / 1000 * WP, vy = vents[i][1] / 1000 * WP;\n" ++
+    "      var vd = disc(vr, 'rgba(150,60,200,0.75)', 0.85, 'v' + Math.round(vr)), vd2 = disc(vr * 0.55, 'rgba(210,120,255,0.8)', 0.7, 'w' + Math.round(vr));\n" ++
+    "      g.drawImage(vd, Math.round(vx - vd.width / 2), Math.round(vy - vd.height / 2)); g.drawImage(vd2, Math.round(vx - vd2.width / 2), Math.round(vy - vd2.height / 2));\n" ++
+    "      for (var b = 0; b < 7; b++) {\n" ++
+    "        var ph = ((now / 1800) + b / 7) % 1, bx = vx + (hash(b, i) - 0.5) * vr * 1.2 + Math.sin(now / 300 + b) * 1.5, by = vy + vr * 0.4 - ph * vr * 1.5;\n" ++
+    "        g.fillStyle = 'rgba(230,170,255,' + (0.9 - ph * 0.8) + ')'; g.fillRect(Math.round(bx), Math.round(by), 1, 1);\n" ++
+    "      }\n" ++
+    "    }\n" ++
+    "    if (d.poison) for (i = 0; i < d.poison.length; i++) {\n" ++
+    "      var qx = Math.round(d.poison[i][0] / 1000 * WP), qy = Math.round(d.poison[i][1] / 1000 * WP);\n" ++
+    "      g.fillStyle = '#5b1f7a'; g.fillRect(qx - 1, qy, 3, 1); g.fillRect(qx, qy - 1, 1, 3);\n" ++
+    "      g.fillStyle = (f ^ (i & 1)) ? '#d68cff' : '#b45cf0'; g.fillRect(qx, qy, 1, 1); g.fillRect(qx - 1, qy - 1, 1, 1); g.fillRect(qx + 1, qy + 1, 1, 1);\n" ++
+    "    }\n" ++
     "    for (i = 0; i < d.plants.length; i++) {\n" ++
     "      var x = Math.round(d.plants[i][0] / 1000 * WP), y = Math.round(d.plants[i][1] / 1000 * WP), h = hash(d.plants[i][0], d.plants[i][1]);\n" ++
     "      g.fillStyle = '#1f7a5c'; g.fillRect(x - 1, y, 3, 1); g.fillRect(x, y - 1, 1, 3);\n" ++
@@ -397,6 +432,10 @@ fun js() {
     "    ag.drawImage(wc, view.ox, view.oy, view.s, view.s);\n" ++
     "    ag.strokeStyle = 'rgba(255,255,255,0.10)'; ag.lineWidth = 1; ag.strokeRect(view.ox - 0.5, view.oy - 0.5, view.s + 1, view.s + 1);\n" ++
     "    if (!last) return;\n" ++
+    "    ag.font = '600 10px ui-sans-serif,-apple-system,sans-serif'; ag.textAlign = 'center';\n" ++
+    "    for (i = 0; i < vents.length; i++) { ag.fillStyle = 'rgba(214,140,255,0.75)'; ag.fillText('TOXIC VENT', SX(vents[i][0] / 1000), SY(vents[i][1] / 1000) + vents[i][2] / 1000 * view.s + 12); }\n" ++
+    "    for (i = 0; i < meadows.length; i++) { ag.fillStyle = 'rgba(110,230,170,0.35)'; ag.fillText('algae meadow', SX(meadows[i][0] / 1000), SY(meadows[i][1] / 1000) - meadows[i][2] / 1000 * view.s - 4); }\n" ++
+    "    ag.fillStyle = 'rgba(190,200,215,0.45)'; ag.fillText('ROCK REEF', SX(1.28 / WS), SY(1.03 / WS));\n" ++
     "    var k = view.k, i;\n" ++
     "    for (i = 0; i < last.preds.length && i < predPos.length; i++) {\n" ++
     "      var pr = last.preds[i], q = predPos[i], u = clamp((now - q.t) / gap, 0, 1), x = SX(q.x0 + (q.x1 - q.x0) * u), y = SY(q.y0 + (q.y1 - q.y0) * u), mode = pr[2];\n" ++
@@ -436,7 +475,7 @@ fun js() {
     "    if (sel) {\n" ++
     "      var R = sel[2].h * k * 0.62 + 2 + Math.sin(now / 250) * 1.5;\n" ++
     "      ag.strokeStyle = '#fff'; ag.lineWidth = 1.5; ag.beginPath(); ag.arc(sel[0], sel[1], R, 0, 6.2832); ag.stroke();\n" ++
-    "      ag.strokeStyle = 'rgba(255,255,255,0.18)'; ag.setLineDash([3, 5]); ag.beginPath(); ag.arc(sel[0], sel[1], sel[3][14] / 100 * view.s, 0, 6.2832); ag.stroke(); ag.setLineDash([]);\n" ++
+    "      ag.strokeStyle = 'rgba(255,255,255,0.18)'; ag.setLineDash([3, 5]); ag.beginPath(); ag.arc(sel[0], sel[1], sel[3][14] / 100 / WS * view.s, 0, 6.2832); ag.stroke(); ag.setLineDash([]);\n" ++
     "      ag.fillStyle = '#fff'; ag.font = '600 11px ui-sans-serif,-apple-system,sans-serif'; ag.textAlign = 'center'; ag.fillText('#' + sel[3][1], sel[0], sel[1] - R - 6);\n" ++
     "    }\n" ++
     "  }\n" ++
@@ -447,7 +486,7 @@ fun js() {
     "    if (!inspId || !last) return;\n" ++
     "    var sr = rowOf(last.sel); if (!sr || sr[1] !== inspId || !last.acts.length) { bg.fillStyle = '#666'; bg.font = '12px ui-sans-serif,-apple-system,sans-serif'; bg.textAlign = 'left'; bg.fillText('reading its brain...', 12, 20); return; }\n" ++
     "    var acts = last.acts, sens = last.sens, n = acts.length, i, k, types = net && net.types ? net.types : [];\n" ++
-    "    function sp(i) { return [78, 10 + (BH - 20) * (i + 0.5) / 18]; }\n" ++
+    "    function sp(i) { return [78, 8 + (BH - 16) * (i + 0.5) / SENS.length]; }\n" ++
     "    function op(i) { return [BW - 64, BH * (0.14 + i * 0.18)]; }\n" ++
     "    function hp(i) { var hx = 0.5 + (hash(i, 7) - 0.5) * 0.4, hy = 0.08 + 0.84 * ((i - 5 + 0.5) / Math.max(1, n - 5)); return [100 + (BW - 190) * hx, 10 + (BH - 20) * hy]; }\n" ++
     "    var P = []; for (i = 0; i < n; i++) P.push(i < 5 ? op(i) : hp(i));\n" ++
@@ -471,7 +510,7 @@ fun js() {
     "      }\n" ++
     "    }\n" ++
     "    bg.font = '10px ui-sans-serif,-apple-system,sans-serif'; bg.textAlign = 'right';\n" ++
-    "    for (i = 0; i < 18; i++) {\n" ++
+    "    for (i = 0; i < SENS.length; i++) {\n" ++
     "      var s = sp(i), v = (sens[i] || 0) / 100, av = Math.min(1, Math.abs(v));\n" ++
     "      bg.fillStyle = rgba(v >= 0 ? [80, 227, 194] : [255, 120, 120], 0.15 + av * 0.85); bg.fillRect(s[0] - 3, s[1] - 3, 6, 6);\n" ++
     "      bg.fillStyle = av > 0.05 ? '#d0d0d0' : '#5a5a5a'; bg.fillText(SENS[i], s[0] - 8, s[1] + 3.5);\n" ++
