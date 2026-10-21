@@ -3,3 +3,4 @@ build/
 *.gen.c
 .DS_Store
 *.swp
+checkpoints/

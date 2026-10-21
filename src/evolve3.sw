@@ -1,0 +1,1369 @@
+module Main
+
+# swarm-live — Evolution 3: real neuroevolution
+#
+#   make bin/evolve3 && scripts/run.sh evolve3      ->  http://localhost:4016
+#
+# No expert, no teacher. Every creature's brain is written in its genome and every
+# neuron is a swarmrt process. Nothing tells a creature what to do: brains that
+# happen to find food, flee and mate leave children; the rest starve.
+#
+#   GENOME     diploid: two copies (haplotypes) of every gene. Body loci carry an
+#              allele value and a dominance; the expressed trait is the
+#              dominance-weighted blend, so recessive variation hides and returns.
+#              Brain genes are neurons and synapses (NEAT-style ids from a hash of
+#              the split connection, so the same innovation lines up across lineages).
+#   SEX        two willing, fertile, compatible creatures that meet have a child:
+#              each parent makes a gamete by meiosis (crossover between its two
+#              haplotypes with linkage) plus mutation. A creature with plenty of
+#              energy and no partner can bud (self-fertilise), which costs more.
+#   BRAIN      a hybrid net: rate neurons (leaky tanh), spiking neurons (integrate
+#              and fire) and modulatory neurons. Synapses learn during a life by an
+#              evolved rule  dw = eta * tanh(m0 + modulation) * (A*pre*post + B*pre + C*post + D)
+#              — eta, A..D and m0 are genes. Learned weights are NOT inherited.
+#   COST       every neuron and every synapse (one message per tick) costs energy.
+#   SPECIES    creatures are grouped by genetic distance to a type specimen;
+#              mates must be genetically close (the creature's choosiness gene).
+#   CHECKPOINT the population's genomes are saved to checkpoints/evolve3/ and
+#              reloaded at start, so evolution keeps going across runs.
+
+import LiveView
+import Evolve3Js
+import Math
+import Std
+
+let max_slots = 110
+let pop_cap = 100
+let nmax = 24
+let n_out = 5
+let n_sens = 18
+let n_loci = 19
+let tick_ms = 30
+let k_act = 100000
+let k_w = 200000
+let ck_dir = "checkpoints/evolve3"
+
+#           size speed armor attack sight diet  hue    p1   p2   p3   mut  eta  A     B     C     D     m0    fert choosy
+let LO = [0.6, 0.5, 0.0, 0.0, 0.15, 0.0, 0.0, 0.0, 0.0, 0.0, 0.3, 0.0, -1.0, -1.0, -1.0, -0.3, -2.0, 45.0, 0.4]
+let HI = [1.6, 1.8, 1.5, 2.0, 0.5, 1.0, 360.0, 1.0, 1.0, 1.0, 3.0, 0.2, 1.0, 1.0, 1.0, 0.3, 2.0, 95.0, 2.5]
+
+fun num(x) { if (x == nil) { 0 } else { x } }
+fun list_or_empty(x) { if (x == nil) { [] } else { x } }
+fun tget(tab, k) { ets_get(tab + k % 16, k) }
+fun tput(tab, k, v) { ets_put(tab + k % 16, k, v) }
+fun cget(tab, k) { ets_get(tab + 16, k) }
+fun cput(tab, k, v) { ets_put(tab + 16, k, v) }
+fun fmin(a, b) { if (a < b) { a } else { b } }
+fun fmax(a, b) { if (a > b) { a } else { b } }
+fun fabs(a) { if (a < 0.0) { 0.0 - a } else { a } }
+fun clampf(v, lo, hi) { if (v < lo) { lo } else { if (v > hi) { hi } else { v } } }
+fun g(s, k) { map_get(s, k) }
+fun p(s, k, v) { map_put(s, k, v) }
+fun app(a, b) { if (length(a) == 0) { b } else { [hd(a) | app(tl(a), b)] } }
+fun nth(lst, k) { if (k <= 0) { hd(lst) } else { nth(tl(lst), k - 1) } }
+fun rev(l, acc) { if (length(l) == 0) { acc } else { rev(tl(l), [hd(l) | acc]) } }
+fun lo(k) { nth(LO, k) }
+fun is_sens(s) { s >= 1000 && s < 2000 }
+fun hi(k) { nth(HI, k) }
+
+fun make_tables(base, more) {
+    if (more <= 0) { base }
+    else {
+        id = ets_new()
+        if (id == base + (17 - more)) { make_tables(base, more - 1) } else { panic("ets ids not contiguous") }
+    }
+}
+
+fun hsh(a, b) {
+    x = (a * 7919 + b * 104729 + 13) % 2147483648
+    h1 = (x * 1103515245 + 12345) % 2147483648
+    h2 = (h1 * 1103515245 + 12345) % 2147483648
+    h2 / 65536
+}
+
+fun rndf() { to_float(random_int(0, 999999)) / 1000000.0 }
+fun rndi(n) { if (n <= 1) { 0 } else { random_int(0, n - 1) } }
+fun gauss() { (rndf() + rndf() + rndf() - 1.5) * 1.15 }
+
+fun tanh(x) {
+    if (x > 9.0) { 1.0 }
+    else { if (x < 0.0 - 9.0) { 0.0 - 1.0 } else { e2 = Math.exp(2.0 * x)  (e2 - 1.0) / (e2 + 1.0) } }
+}
+
+fun hue_gap(a, b) {
+    d = fabs(a - b)
+    if (d > 180.0) { 360.0 - d } else { d }
+}
+
+# ------------------------------------------------------------
+# Genome: a haplotype is %{b: [[value, dominance] x 19], n: [[id, type, bias, tau]], c: [[src, dst, w]]}
+#   neuron ids 0..4 are the outputs (turn, thrust, bite, signal, mate); type 0 rate, 1 modulatory, 2 spiking
+#   src 1000..1017 is a sensor (src - 1000); hidden neuron ids are 2000 + a hash
+# ------------------------------------------------------------
+fun rand_body(k) {
+    if (k >= n_loci) { [] }
+    else {
+        v = if (k == 5) { rndf() * 0.4 } else { if (k == 11) { rndf() * 0.08 } else { lo(k) + rndf() * (hi(k) - lo(k)) } }
+        [[v, 0.2 + rndf() * 0.8] | rand_body(k + 1)]
+    }
+}
+
+fun out_neurons(k) { if (k >= n_out) { [] } else { [[k, 0, gauss() * 0.3, 1.0 + rndf() * 1.5] | out_neurons(k + 1)] } }
+
+fun rand_conns(k) {
+    if (k <= 0) { [] }
+    else { [[1000 + rndi(n_sens), rndi(n_out), gauss() * 1.5] | rand_conns(k - 1)] }
+}
+
+fun random_hap() { %{b: rand_body(0), n: out_neurons(0), c: rand_conns(9)} }
+
+fun wrap_hue(v) { if (v < 0.0) { v + 360.0 } else { if (v > 360.0) { v - 360.0 } else { v } } }
+
+fun mut_body(lst, k, r) {
+    if (length(lst) == 0) { [] }
+    else {
+        v = hd(hd(lst))
+        d = hd(tl(hd(lst)))
+        span = hi(k) - lo(k)
+        v2 = if (rndf() < 0.004 * r) { lo(k) + rndf() * span }
+             else { if (rndf() < 0.10 * r) { if (k == 6) { wrap_hue(v + gauss() * 0.07 * span) } else { clampf(v + gauss() * 0.07 * span, lo(k), hi(k)) } } else { v } }
+        d2 = if (rndf() < 0.03 * r) { clampf(d + gauss() * 0.25, 0.05, 1.0) } else { d }
+        [[v2, d2] | mut_body(tl(lst), k + 1, r)]
+    }
+}
+
+fun mut_neurons(lst, r) {
+    if (length(lst) == 0) { [] }
+    else {
+        n = hd(lst)
+        id = nth(n, 0)
+        ty = if (id >= n_out && rndf() < 0.012 * r) { rndi(3) } else { nth(n, 1) }
+        b = if (rndf() < 0.08 * r) { clampf(nth(n, 2) + gauss() * 0.4, 0.0 - 3.0, 3.0) } else { nth(n, 2) }
+        t = if (rndf() < 0.05 * r) { clampf(nth(n, 3) + gauss() * 0.6, 1.0, 6.0) } else { nth(n, 3) }
+        [[id, ty, b, t] | mut_neurons(tl(lst), r)]
+    }
+}
+
+fun mut_conns(lst, r) {
+    if (length(lst) == 0) { [] }
+    else {
+        c = hd(lst)
+        w = nth(c, 2)
+        w2 = if (rndf() < 0.01 * r) { gauss() * 2.0 } else { if (rndf() < 0.12 * r) { clampf(w + gauss() * 0.5, 0.0 - 4.0, 4.0) } else { w } }
+        [[nth(c, 0), nth(c, 1), w2] | mut_conns(tl(lst), r)]
+    }
+}
+
+fun find_n(lst, id) { if (length(lst) == 0) { nil } else { if (hd(hd(lst)) == id) { hd(lst) } else { find_n(tl(lst), id) } } }
+fun find_c(lst, s, d) {
+    if (length(lst) == 0) { nil }
+    else { c = hd(lst)  if (hd(c) == s && nth(c, 1) == d) { c } else { find_c(tl(lst), s, d) } }
+}
+fun drop_at(lst, k) { if (length(lst) == 0) { [] } else { if (k == 0) { tl(lst) } else { [hd(lst) | drop_at(tl(lst), k - 1)] } } }
+
+fun add_conn(h) {
+    ns = g(h, 'n')
+    src = if (rndf() < 0.6) { 1000 + rndi(n_sens) } else { hd(nth(ns, rndi(length(ns)))) }
+    dst = hd(nth(ns, rndi(length(ns))))
+    if (find_c(g(h, 'c'), src, dst) != nil) { h } else { p(h, 'c', [[src, dst, gauss()] | g(h, 'c')]) }
+}
+
+fun del_conn(h) {
+    cs = g(h, 'c')
+    if (length(cs) <= 1) { h } else { p(h, 'c', drop_at(cs, rndi(length(cs)))) }
+}
+
+# split a synapse with a new neuron; its id is a hash of the synapse, so the same
+# innovation in two lineages gets the same id and lines up at crossover
+fun add_neuron(h) {
+    cs = g(h, 'c')
+    if (length(cs) == 0) { h }
+    else {
+        k = rndi(length(cs))
+        c = nth(cs, k)
+        nid = 2000 + hsh(nth(c, 0), nth(c, 1)) % 1000000
+        if (find_n(g(h, 'n'), nid) != nil) { h }
+        else {
+            r = rndf()
+            ty = if (r < 0.65) { 0 } else { if (r < 0.82) { 1 } else { 2 } }
+            n2 = app(g(h, 'n'), [[nid, ty, 0.0, 1.0 + rndf() * 2.0]])
+            c2 = [[nth(c, 0), nid, 1.0], [nid, nth(c, 1), nth(c, 2)] | drop_at(cs, k)]
+            %{b: g(h, 'b'), n: n2, c: c2}
+        }
+    }
+}
+
+fun mutate_hap(h, r) {
+    h1 = %{b: mut_body(g(h, 'b'), 0, r), n: mut_neurons(g(h, 'n'), r), c: mut_conns(g(h, 'c'), r)}
+    h2 = if (rndf() < 0.22 * r) { add_conn(h1) } else { h1 }
+    h3 = if (rndf() < 0.07 * r) { del_conn(h2) } else { h2 }
+    if (rndf() < 0.06 * r && length(g(h3, 'n')) < nmax) { add_neuron(h3) } else { h3 }
+}
+
+# ---- meiosis: a gamete takes body loci from one haplotype, switching with
+# probability 0.15 between neighbouring loci (genetic linkage) ----
+fun gam_body(a, b, side) {
+    if (length(a) == 0) { [] }
+    else {
+        s2 = if (rndf() < 0.15) { 1 - side } else { side }
+        [if (s2 == 0) { hd(a) } else { hd(b) } | gam_body(tl(a), tl(b), s2)]
+    }
+}
+
+# brain genes: a gene in both copies -> one allele at random; in one copy only
+# (heterozygous presence) -> passed on half the time; outputs always kept
+fun gam_neurons(as, bs) {
+    if (length(as) == 0) { [] }
+    else {
+        x = hd(as)
+        y = find_n(bs, hd(x))
+        keep = if (y != nil) { if (rndf() < 0.5) { x } else { y } } else { if (hd(x) < n_out || rndf() < 0.5) { x } else { nil } }
+        rest = gam_neurons(tl(as), bs)
+        if (keep == nil) { rest } else { [keep | rest] }
+    }
+}
+
+fun only_in(bs, as, is_conn) {
+    if (length(bs) == 0) { [] }
+    else {
+        y = hd(bs)
+        found = if (is_conn) { find_c(as, hd(y), nth(y, 1)) } else { find_n(as, hd(y)) }
+        rest = only_in(tl(bs), as, is_conn)
+        if (found == nil && rndf() < 0.5) { [y | rest] } else { rest }
+    }
+}
+
+fun gam_conns(as, bs) {
+    if (length(as) == 0) { [] }
+    else {
+        x = hd(as)
+        y = find_c(bs, hd(x), nth(x, 1))
+        keep = if (y != nil) { if (rndf() < 0.5) { x } else { y } } else { if (rndf() < 0.5) { x } else { nil } }
+        rest = gam_conns(tl(as), bs)
+        if (keep == nil) { rest } else { [keep | rest] }
+    }
+}
+
+fun gamete(a, b, rate) {
+    ns = app(gam_neurons(g(a, 'n'), g(b, 'n')), only_in(g(b, 'n'), g(a, 'n'), false))
+    cs = app(gam_conns(g(a, 'c'), g(b, 'c')), only_in(g(b, 'c'), g(a, 'c'), true))
+    ns2 = if (length(ns) > nmax) { Std.take(ns, nmax) } else { ns }
+    mutate_hap(%{b: gam_body(g(a, 'b'), g(b, 'b'), rndi(2)), n: ns2, c: cs}, rate)
+}
+
+# ---- expression: genotype -> phenotype ----
+fun expr_body(a, b, k) {
+    if (length(a) == 0) { [] }
+    else {
+        va = hd(hd(a))
+        da = hd(tl(hd(a)))
+        vb = hd(hd(b))
+        db = hd(tl(hd(b)))
+        v = if (k == 6 && fabs(va - vb) > 180.0) { wrap_hue((da * va + db * (vb + (if (vb < va) { 360.0 } else { 0.0 - 360.0 }))) / (da + db)) }
+            else { (da * va + db * vb) / (da + db + 0.000001) }
+        [v | expr_body(tl(a), tl(b), k + 1)]
+    }
+}
+
+fun expr_neurons(as, bs) {
+    if (length(as) == 0) { only_all(bs, []) }
+    else {
+        x = hd(as)
+        y = find_n(bs, hd(x))
+        e = if (y == nil) { x } else { [hd(x), nth(x, 1), (nth(x, 2) + nth(y, 2)) / 2.0, (nth(x, 3) + nth(y, 3)) / 2.0] }
+        [e | expr_neurons(tl(as), remove_n(bs, hd(x)))]
+    }
+}
+fun remove_n(lst, id) { if (length(lst) == 0) { [] } else { if (hd(hd(lst)) == id) { tl(lst) } else { [hd(lst) | remove_n(tl(lst), id)] } } }
+fun only_all(bs, acc) { app(bs, acc) }
+
+fun expr_conns(as, bs) {
+    if (length(as) == 0) { bs }
+    else {
+        x = hd(as)
+        y = find_c(bs, hd(x), nth(x, 1))
+        e = if (y == nil) { x } else { [hd(x), nth(x, 1), (nth(x, 2) + nth(y, 2)) / 2.0] }
+        [e | expr_conns(tl(as), remove_c(bs, hd(x), nth(x, 1)))]
+    }
+}
+fun remove_c(lst, s, d) {
+    if (length(lst) == 0) { [] }
+    else { c = hd(lst)  if (hd(c) == s && nth(c, 1) == d) { tl(lst) } else { [c | remove_c(tl(lst), s, d)] } }
+}
+
+# outputs first (local 0..4), hidden after, capped
+fun order_neurons(ns) {
+    outs = order_outs(ns, 0)
+    hid = hidden_of(ns)
+    all = app(outs, hid)
+    if (length(all) > nmax) { Std.take(all, nmax) } else { all }
+}
+fun order_outs(ns, k) { if (k >= n_out) { [] } else { n = find_n(ns, k)  [if (n == nil) { [k, 0, 0.0, 1.0] } else { n } | order_outs(ns, k + 1)] } }
+fun hidden_of(ns) { if (length(ns) == 0) { [] } else { if (hd(hd(ns)) >= n_out) { [hd(ns) | hidden_of(tl(ns))] } else { hidden_of(tl(ns)) } } }
+
+fun idx_of(ns, id, k) { if (length(ns) == 0) { -1 } else { if (hd(hd(ns)) == id) { k } else { idx_of(tl(ns), id, k + 1) } } }
+
+# keep only synapses whose ends exist in this body
+fun live_conns(cs, ns) {
+    if (length(cs) == 0) { [] }
+    else {
+        c = hd(cs)
+        ok = idx_of(ns, nth(c, 1), 0) >= 0 && (is_sens(hd(c)) || idx_of(ns, hd(c), 0) >= 0)
+        if (ok) { [c | live_conns(tl(cs), ns)] } else { live_conns(tl(cs), ns) }
+    }
+}
+
+# genetic distance on the body loci 0..9 (morphology, colour, pattern)
+fun body_dist(p1, p2, k) {
+    if (k >= 10) { 0.0 }
+    else {
+        a = nth(p1, k)
+        b = nth(p2, k)
+        d = if (k == 6) { hue_gap(a, b) / 180.0 } else { fabs(a - b) / (hi(k) - lo(k)) }
+        d + body_dist(p1, p2, k + 1)
+    }
+}
+
+# ------------------------------------------------------------
+# Neurons: each is a process. It keeps its own incoming synapses
+# [key, kind, w] (key = local source or 1000+sensor; kind 1 = modulatory source),
+# integrates what arrived since the last tick, fires, learns, and reports.
+# ------------------------------------------------------------
+fun neuron(cfg, inl) {
+    receive {
+        {'wire', pids} -> neuron_loop(cfg, inl, out_pids(elem(cfg, 5), pids), 0.0, 0.0, [], 0)
+        {'stop'} -> 'ok'
+    }
+}
+
+fun out_pids(outs, pids) { if (length(outs) == 0) { [] } else { [nth(pids, hd(outs)) | out_pids(tl(outs), pids)] } }
+
+# cfg = {slot, li, type, bias, tau, outs, plast [eta A B C D m0], tab, world}
+fun neuron_loop(cfg, w, outp, a, v, ins, cnt) {
+    receive {
+        {'in', src, x} -> neuron_loop(cfg, w, outp, a, v, [{src, x} | ins], cnt)
+        {'tick', sens, plast} ->
+            pres = pre_vals(w, sens, ins)
+            xm = sum_in(w, pres, 0.0, 0.0)
+            ty = elem(cfg, 2)
+            tau = elem(cfg, 4)
+            x = elem(xm, 0) + elem(cfg, 3)
+            spike = ty == 2 && v * (1.0 - 1.0 / tau) + x >= 1.0
+            a2 = if (ty == 2) { if (spike) { 1.0 } else { 0.0 } } else { a + (tanh(x) - a) / tau }
+            v2 = if (ty == 2) { if (spike) { 0.0 } else { fmax(0.0 - 1.0, v * (1.0 - 1.0 / tau) + x) } } else { 0.0 }
+            pl = elem(cfg, 6)
+            eta = hd(pl)
+            w2 = if (plast == 1 && eta > 0.002) {
+                mod = tanh(nth(pl, 5) + elem(xm, 1))
+                learn(w, pres, a2, eta * mod, nth(pl, 1), nth(pl, 2), nth(pl, 3), nth(pl, 4))
+            } else { w }
+            send_outs(outp, elem(cfg, 1), a2)
+            gid = elem(cfg, 0) * nmax + elem(cfg, 1)
+            tab = elem(cfg, 7)
+            tput(tab, k_act + gid, a2)
+            if (cnt % 16 == 0) { tput(tab, k_w + gid, w2) } else { 'x' }
+            send(elem(cfg, 8), {'a'})
+            neuron_loop(cfg, w2, outp, a2, v2, [], cnt + 1)
+        {'stop'} -> 'ok'
+    }
+}
+
+fun lookup(ins, src) {
+    if (length(ins) == 0) { 0.0 }
+    else { if (elem(hd(ins), 0) == src) { elem(hd(ins), 1) } else { lookup(tl(ins), src) } }
+}
+
+fun pre_vals(w, sens, ins) {
+    if (length(w) == 0) { [] }
+    else {
+        k = hd(hd(w))
+        [if (k >= 1000) { nth(sens, k - 1000) } else { lookup(ins, k) } | pre_vals(tl(w), sens, ins)]
+    }
+}
+
+fun sum_in(w, pres, x, m) {
+    if (length(w) == 0) { {x, m} }
+    else {
+        e = hd(w)
+        c = nth(e, 2) * hd(pres)
+        if (nth(e, 1) == 1) { sum_in(tl(w), tl(pres), x, m + c) } else { sum_in(tl(w), tl(pres), x + c, m) }
+    }
+}
+
+# the evolved learning rule, gated by neuromodulation
+fun learn(w, pres, post, rate, ca, cb, cc, cd) {
+    if (length(w) == 0) { [] }
+    else {
+        e = hd(w)
+        pre = hd(pres)
+        dw = rate * (ca * pre * post + cb * pre + cc * post + cd)
+        [[hd(e), nth(e, 1), clampf(nth(e, 2) + dw, 0.0 - 4.0, 4.0)] | learn(tl(w), tl(pres), post, rate, ca, cb, cc, cd)]
+    }
+}
+
+fun send_outs(outp, li, a) {
+    if (length(outp) == 0) { 'ok' } else { send(hd(outp), {'in', li, a})  send_outs(tl(outp), li, a) }
+}
+
+# ---- building a brain from a phenotype: spawn one process per neuron, then wire them ----
+fun in_list(cs, ns, id) {
+    if (length(cs) == 0) { [] }
+    else {
+        c = hd(cs)
+        rest = in_list(tl(cs), ns, id)
+        if (nth(c, 1) == id) {
+            s = hd(c)
+            key = if (is_sens(s)) { s } else { idx_of(ns, s, 0) }
+            kind = if (is_sens(s) == false && nth(find_n(ns, s), 1) == 1) { 1 } else { 0 }
+            [[key, kind, nth(c, 2)] | rest]
+        } else { rest }
+    }
+}
+
+fun out_list(cs, ns, id) {
+    if (length(cs) == 0) { [] }
+    else {
+        c = hd(cs)
+        rest = out_list(tl(cs), ns, id)
+        if (hd(c) == id) { [idx_of(ns, nth(c, 1), 0) | rest] } else { rest }
+    }
+}
+
+fun spawn_neurons(tab, world, slot, ns, cs, all, pl, li) {
+    if (length(ns) == 0) { [] }
+    else {
+        n = hd(ns)
+        id = hd(n)
+        cfg = {slot, li, nth(n, 1), nth(n, 2), nth(n, 3), out_list(cs, all, id), pl, tab, world}
+        inl = in_list(cs, all, id)
+        pid = spawn(neuron(cfg, inl))
+        [pid | spawn_neurons(tab, world, slot, tl(ns), cs, all, pl, li + 1)]
+    }
+}
+
+fun send_all(pids, msg) { if (length(pids) == 0) { 'ok' } else { send(hd(pids), msg)  send_all(tl(pids), msg) } }
+
+fun in_lists(cs, ns, all) { if (length(ns) == 0) { [] } else { [in_list(cs, all, hd(hd(ns))) | in_lists(cs, tl(ns), all)] } }
+
+# ------------------------------------------------------------
+# Creatures
+# ------------------------------------------------------------
+fun phenotype(ha, hb) {
+    ph = expr_body(g(ha, 'b'), g(hb, 'b'), 0)
+    ns = order_neurons(expr_neurons(g(ha, 'n'), g(hb, 'n')))
+    cs = live_conns(expr_conns(g(ha, 'c'), g(hb, 'c')), ns)
+    {ph, ns, cs}
+}
+
+fun make_creature(tab, world, s, ha, hb, slot, gen, sp, x, y, e, mom, dad) {
+    pt = phenotype(ha, hb)
+    ph = elem(pt, 0)
+    ns = elem(pt, 1)
+    cs = elem(pt, 2)
+    pl = [nth(ph, 11), nth(ph, 12), nth(ph, 13), nth(ph, 14), nth(ph, 15), nth(ph, 16)]
+    pids = spawn_neurons(tab, world, slot, ns, cs, ns, pl, 0)
+    send_all(pids, {'wire', pids})
+    a = rndf() * 6.2832
+    %{id: g(s, 'next_id'), slot: slot, gen: gen, sp: sp, ha: ha, hb: hb, ph: ph,
+      types: types_of(ns), inl: in_lists(cs, ns, ns), pids: pids, nn: length(ns), nc: length(cs),
+      x: x, y: y, hx: Math.cos(a), hy: Math.sin(a), e: e, h: 100.0, age: 0, life: 2200 + rndi(1400),
+      cool: 160, acd: 0, kids: 0, kills: 0, eaten: 0, pain: 0, sig: 0.0, bite: 0, mate: 0, outs: [0.0, 0.0, 0.0, 0.0, 0.0],
+      sv: [], mom: mom, dad: dad, killer: 0}
+}
+
+fun types_of(ns) { if (length(ns) == 0) { [] } else { [nth(hd(ns), 1) | types_of(tl(ns))] } }
+
+fun kill_brain(c) { send_all(g(c, 'pids'), {'stop'}) }
+
+fun founder_genome() {
+    a = random_hap()
+    {a, mutate_hap(a, 1.0)}
+}
+
+# ------------------------------------------------------------
+# World: plants grow in drifting patches, corpses become meat, two predators
+# ------------------------------------------------------------
+fun obstacles() { [[0.28, 0.32, 0.06], [0.72, 0.30, 0.05], [0.52, 0.70, 0.07], [0.15, 0.78, 0.05], [0.86, 0.82, 0.05]] }
+
+fun in_obstacle(x, y, obs) {
+    if (length(obs) == 0) { false }
+    else {
+        o = hd(obs)
+        dx = x - hd(o)
+        dy = y - nth(o, 1)
+        r = nth(o, 2) + 0.02
+        if (dx * dx + dy * dy < r * r) { true } else { in_obstacle(x, y, tl(obs)) }
+    }
+}
+
+fun clampw(v) { clampf(v, 0.02, 0.98) }
+
+fun patch_center(k, t) {
+    a = to_float(k) * 1.0472 + to_float(t) * 0.00004
+    {0.5 + 0.30 * Math.cos(a), 0.5 + 0.30 * Math.sin(a)}
+}
+
+fun plant_pos(t, tries) {
+    c = patch_center(rndi(6), t)
+    x = clampw(elem(c, 0) + gauss() * 0.07)
+    y = clampw(elem(c, 1) + gauss() * 0.07)
+    if (tries <= 0 || in_obstacle(x, y, obstacles()) == false) { [x, y, 0] } else { plant_pos(t, tries - 1) }
+}
+
+fun init_plants(k, t) { if (k <= 0) { [] } else { [plant_pos(t, 10) | init_plants(k - 1, t)] } }
+
+fun free_pos(tries) {
+    x = 0.06 + rndf() * 0.88
+    y = 0.06 + rndf() * 0.88
+    if (tries <= 0 || in_obstacle(x, y, obstacles()) == false) { [x, y] } else { free_pos(tries - 1) }
+}
+
+fun slots(k) { if (k >= max_slots) { [] } else { [k | slots(k + 1)] } }
+
+fun new_world() {
+    %{crs: [], plants: init_plants(72, 0), meat: [],
+      preds: [[0.9, 0.9, 0, 200, 0.0 - 1.0, 0.0], [0.1, 0.1, 0, 300, 1.0, 0.0]],
+      free: slots(0), next_id: 1, tick: 0, init: 0,
+      b_sex: 0, b_bud: 0, b_imm: 0, d_starve: 0, d_pred: 0, d_eaten: 0, d_old: 0,
+      maxgen: 0, sps: [], sp_next: 1, hof: [], evs: [], ck_tick: 0, ck_note: "", pred_on: 1}
+}
+
+# ---- senses: 18 numbers per creature ----
+#  0 bias  1 plant angle 2 plant near  3 meat angle 4 meat near
+#  5 creature angle 6 near 7 kinship 8 relative size 9 its signal
+#  10 predator angle 11 near 12 threat  13 wall ahead  14 energy 15 health 16 pain 17 heard signal
+fun rel(hx, hy, dx, dy, d) {
+    dd = d + 0.000001
+    dot = (hx * dx + hy * dy) / dd
+    cross = (hx * dy - hy * dx) / dd
+    if (dot >= 0.0) { cross } else { if (cross >= 0.0) { 1.0 } else { 0.0 - 1.0 } }
+}
+
+fun nearest_item(lst, x, y, best) {
+    if (length(lst) == 0) { best }
+    else {
+        it = hd(lst)
+        dx = hd(it) - x
+        dy = nth(it, 1) - y
+        d = Math.sqrt(dx * dx + dy * dy)
+        ok = nth(it, 2) <= 0 && (best == nil || d < hd(best))
+        nearest_item(tl(lst), x, y, if (ok) { [d, dx, dy] } else { best })
+    }
+}
+
+fun nearest_meat(lst, x, y, best) {
+    if (length(lst) == 0) { best }
+    else {
+        it = hd(lst)
+        dx = hd(it) - x
+        dy = nth(it, 1) - y
+        d = Math.sqrt(dx * dx + dy * dy)
+        nearest_meat(tl(lst), x, y, if (best == nil || d < hd(best)) { [d, dx, dy] } else { best })
+    }
+}
+
+# one pass over the other creatures: nearest one, and the mean signal heard nearby
+fun scan_crs(crs, c, best, sig, cnt) {
+    if (length(crs) == 0) { {best, if (cnt > 0) { sig / to_float(cnt) } else { 0.0 }} }
+    else {
+        o = hd(crs)
+        if (g(o, 'id') == g(c, 'id')) { scan_crs(tl(crs), c, best, sig, cnt) }
+        else {
+            dx = g(o, 'x') - g(c, 'x')
+            dy = g(o, 'y') - g(c, 'y')
+            d = Math.sqrt(dx * dx + dy * dy)
+            near = d < 0.15
+            scan_crs(tl(crs), c, if (best == nil || d < hd(best)) { [d, dx, dy, o] } else { best },
+                     if (near) { sig + g(o, 'sig') } else { sig }, if (near) { cnt + 1 } else { cnt })
+        }
+    }
+}
+
+fun nearest_pred(lst, x, y, best) {
+    if (length(lst) == 0) { best }
+    else {
+        pr = hd(lst)
+        dx = hd(pr) - x
+        dy = nth(pr, 1) - y
+        d = Math.sqrt(dx * dx + dy * dy)
+        nearest_pred(tl(lst), x, y, if (best == nil || d < hd(best)) { [d, dx, dy, nth(pr, 2)] } else { best })
+    }
+}
+
+fun wall_t(x, y, dx, dy) {
+    tx = if (dx > 0.0) { (1.0 - x) / dx } else { if (dx < 0.0) { (0.0 - x) / dx } else { 99.0 } }
+    ty = if (dy > 0.0) { (1.0 - y) / dy } else { if (dy < 0.0) { (0.0 - y) / dy } else { 99.0 } }
+    fmin(tx, ty)
+}
+
+fun see(item, sight, hx, hy) {
+    if (item == nil || hd(item) > sight) { [0.0, 0.0] }
+    else { [rel(hx, hy, nth(item, 1), nth(item, 2), hd(item)), 1.0 - hd(item) / sight] }
+}
+
+fun senses(s, c) {
+    x = g(c, 'x')
+    y = g(c, 'y')
+    hx = g(c, 'hx')
+    hy = g(c, 'hy')
+    ph = g(c, 'ph')
+    sight = nth(ph, 4)
+    pl = see(nearest_item(g(s, 'plants'), x, y, nil), sight, hx, hy)
+    mt = see(nearest_meat(g(s, 'meat'), x, y, nil), sight, hx, hy)
+    sc = scan_crs(g(s, 'crs'), c, nil, 0.0, 0)
+    nb = elem(sc, 0)
+    cv = see(nb, sight, hx, hy)
+    seen = nb != nil && hd(nb) <= sight
+    o = if (nb == nil) { nil } else { nth(nb, 3) }
+    kin = if (seen) { fmax(0.0, 1.0 - body_dist(ph, g(o, 'ph'), 0) / 2.5) } else { 0.0 }
+    sz = if (seen) { nth(g(o, 'ph'), 0) - nth(ph, 0) } else { 0.0 }
+    osig = if (seen) { g(o, 'sig') } else { 0.0 }
+    pr = if (g(s, 'pred_on') == 1) { nearest_pred(g(s, 'preds'), x, y, nil) } else { nil }
+    pv = see(pr, sight * 1.3, hx, hy)
+    threat = if (pr == nil || hd(pr) > sight * 1.3) { 0.0 } else { if (nth(pr, 3) == 1) { 1.0 } else { if (nth(pr, 3) == 3) { 0.5 } else { 0.0 } } }
+    wa = 1.0 - fmin(wall_t(x, y, hx, hy), 0.25) / 0.25
+    [1.0, hd(pl), nth(pl, 1), hd(mt), nth(mt, 1), hd(cv), nth(cv, 1), kin, sz, osig,
+     hd(pv), nth(pv, 1), threat, wa, g(c, 'e') / 100.0, g(c, 'h') / 100.0, if (g(c, 'pain') > 0) { 1.0 } else { 0.0 }, elem(sc, 1)]
+}
+
+# ------------------------------------------------------------
+# The tick
+# ------------------------------------------------------------
+fun sense_all(s, crs, plast, acc) {
+    if (length(crs) == 0) { acc }
+    else {
+        c = hd(crs)
+        sv = senses(s, c)
+        send_all(g(c, 'pids'), {'tick', sv, plast})
+        sense_all(s, tl(crs), plast, [p(c, 'sv', sv) | acc])
+    }
+}
+
+fun count_neurons(crs, acc) { if (length(crs) == 0) { acc } else { count_neurons(tl(crs), acc + g(hd(crs), 'nn')) } }
+fun count_conns(crs, acc) { if (length(crs) == 0) { acc } else { count_conns(tl(crs), acc + g(hd(crs), 'nc')) } }
+
+fun wait_acks(n, deadline) {
+    if (n <= 0) { 0 }
+    else {
+        receive {
+            {'a'} -> wait_acks(n - 1, deadline)
+            after 40 { n }
+        }
+    }
+}
+
+fun drain_acks() {
+    receive {
+        {'a'} -> drain_acks()
+        after 0 { 'ok' }
+    }
+}
+
+fun read_acts(tab, slot, k, n) { if (k >= n) { [] } else { [numf(tget(tab, k_act + slot * nmax + k)) | read_acts(tab, slot, k + 1, n)] } }
+fun numf(x) { if (x == nil) { 0.0 } else { x } }
+
+fun rotate_h(hx, hy, ang) {
+    c = Math.cos(ang)
+    sn = Math.sin(ang)
+    nx = hx * c - hy * sn
+    ny = hx * sn + hy * c
+    len = Math.sqrt(nx * nx + ny * ny) + 0.000001
+    {nx / len, ny / len}
+}
+
+fun push_out(x, y, obs) {
+    if (length(obs) == 0) { {x, y} }
+    else {
+        o = hd(obs)
+        dx = x - hd(o)
+        dy = y - nth(o, 1)
+        r = nth(o, 2) + 0.015
+        d2 = dx * dx + dy * dy
+        if (d2 < r * r) { d = Math.sqrt(d2) + 0.000001  {hd(o) + dx / d * r, nth(o, 1) + dy / d * r} } else { push_out(x, y, tl(obs)) }
+    }
+}
+
+# outputs: 0 turn, 1 thrust, 2 bite, 3 signal, 4 mate
+fun act_one(tab, c) {
+    o = read_acts(tab, g(c, 'slot'), 0, n_out)
+    ph = g(c, 'ph')
+    hh = rotate_h(g(c, 'hx'), g(c, 'hy'), 0.20 * hd(o))
+    thrust = fmax(0.0, nth(o, 1))
+    sp = 0.011 * nth(ph, 1) * thrust / (1.0 + 0.3 * nth(ph, 2))
+    po = push_out(clampw(g(c, 'x') + elem(hh, 0) * sp), clampw(g(c, 'y') + elem(hh, 1) * sp), obstacles())
+    cost = 0.02 * thrust * thrust * nth(ph, 1) * nth(ph, 0)
+    c1 = p(p(p(p(c, 'x', elem(po, 0)), 'y', elem(po, 1)), 'hx', elem(hh, 0)), 'hy', elem(hh, 1))
+    p(p(p(p(p(c1, 'e', g(c1, 'e') - cost), 'outs', o), 'sig', nth(o, 3)), 'bite', if (nth(o, 2) > 0.3) { 1 } else { 0 }), 'mate', if (nth(o, 4) > 0.0) { 1 } else { 0 })
+}
+
+fun act_all(tab, crs, acc) { if (length(crs) == 0) { acc } else { act_all(tab, tl(crs), [act_one(tab, hd(crs)) | acc]) } }
+
+# ---- eating ----
+fun eat_plants(lst, c, t, acc, ate) {
+    if (length(lst) == 0) { {acc, ate} }
+    else {
+        it = hd(lst)
+        tm = nth(it, 2)
+        if (tm > 0) { eat_plants(tl(lst), c, t, [it | acc], ate) }
+        else {
+            dx = hd(it) - g(c, 'x')
+            dy = nth(it, 1) - g(c, 'y')
+            r = 0.022 + 0.01 * nth(g(c, 'ph'), 0)
+            if (ate == 0 && dx * dx + dy * dy < r * r) { eat_plants(tl(lst), c, t, [[hd(it), nth(it, 1), 160] | acc], 1) }
+            else { eat_plants(tl(lst), c, t, [it | acc], ate) }
+        }
+    }
+}
+
+# eaten plants regrow somewhere in a patch once their timer runs out (once per tick)
+fun grow_plants(lst, t) {
+    if (length(lst) == 0) { [] }
+    else {
+        it = hd(lst)
+        tm = nth(it, 2)
+        [if (tm <= 0) { it } else { if (tm == 1) { plant_pos(t, 10) } else { [hd(it), nth(it, 1), tm - 1] } } | grow_plants(tl(lst), t)]
+    }
+}
+
+fun eat_meat(lst, c, acc, got) {
+    if (length(lst) == 0) { {acc, got} }
+    else {
+        it = hd(lst)
+        dx = hd(it) - g(c, 'x')
+        dy = nth(it, 1) - g(c, 'y')
+        r = 0.025 + 0.01 * nth(g(c, 'ph'), 0)
+        if (got == 0.0 && dx * dx + dy * dy < r * r) { eat_meat(tl(lst), c, acc, nth(it, 2)) }
+        else { eat_meat(tl(lst), c, [it | acc], got) }
+    }
+}
+
+# plants feed herbivores best, meat feeds carnivores best (the diet gene)
+fun feed_all(s, crs, acc) {
+    if (length(crs) == 0) { p(s, 'crs', acc) }
+    else {
+        c = hd(crs)
+        diet = nth(g(c, 'ph'), 5)
+        f = eat_plants(g(s, 'plants'), c, g(s, 'tick'), [], 0)
+        m = eat_meat(g(s, 'meat'), c, [], 0.0)
+        gain = to_float(elem(f, 1)) * 26.0 * (1.0 - 0.75 * diet) + elem(m, 1) * (0.25 + 0.75 * diet)
+        c2 = if (gain > 0.0) { p(p(c, 'e', fmin(100.0, g(c, 'e') + gain)), 'eaten', g(c, 'eaten') + 1) } else { c }
+        feed_all(p(p(s, 'plants', elem(f, 0)), 'meat', elem(m, 0)), tl(crs), [c2 | acc])
+    }
+}
+
+# ---- fighting: a creature that bites hurts whoever is in reach; armor helps ----
+fun find_id(crs, id) { if (length(crs) == 0) { nil } else { if (g(hd(crs), 'id') == id) { hd(crs) } else { find_id(tl(crs), id) } } }
+
+fun in_reach(crs, a, best) {
+    if (length(crs) == 0) { if (best == nil) { nil } else { elem(best, 1) } }
+    else {
+        c = hd(crs)
+        dx = g(c, 'x') - g(a, 'x')
+        dy = g(c, 'y') - g(a, 'y')
+        d = Math.sqrt(dx * dx + dy * dy)
+        ok = g(c, 'id') != g(a, 'id') && g(c, 'h') > 0.0 && d < 0.035 + 0.014 * nth(g(a, 'ph'), 0)
+        in_reach(tl(crs), a, if (ok && (best == nil || d < elem(best, 0))) { {d, g(c, 'id')} } else { best })
+    }
+}
+
+fun upd(crs, id, f) {
+    if (length(crs) == 0) { [] } else { if (g(hd(crs), 'id') == id) { [f(hd(crs)) | tl(crs)] } else { [hd(crs) | upd(tl(crs), id, f)] } }
+}
+
+fun fight(crs, snap) {
+    if (length(snap) == 0) { crs }
+    else {
+        a = find_id(crs, g(hd(snap), 'id'))
+        if (a != nil && g(a, 'bite') == 1 && g(a, 'acd') <= 0 && g(a, 'h') > 0.0) {
+            tid = in_reach(crs, a, nil)
+            aph = g(a, 'ph')
+            if (tid == nil) { fight(upd(crs, g(a, 'id'), fun(c) { p(p(c, 'acd', 6), 'e', g(c, 'e') - 0.15) }), tl(snap)) }
+            else {
+                t = find_id(crs, tid)
+                dmg = 6.0 * nth(aph, 3) * nth(aph, 0) / (1.0 + nth(g(t, 'ph'), 2))
+                gain = dmg * 0.6 * (0.25 + 0.75 * nth(aph, 5))
+                aid = g(a, 'id')
+                crs2 = upd(crs, tid, fun(c) { p(p(p(c, 'h', g(c, 'h') - dmg), 'pain', 10), 'killer', aid) })
+                dead = g(t, 'h') - dmg <= 0.0
+                crs3 = upd(crs2, aid, fun(c) { p(p(p(c, 'e', fmin(100.0, g(c, 'e') + gain - 0.3)), 'acd', 12), 'kills', g(c, 'kills') + (if (dead) { 1 } else { 0 })) })
+                fight(crs3, tl(snap))
+            }
+        } else { fight(crs, tl(snap)) }
+    }
+}
+
+# ---- predators: stalk (warning), short chase slower than a fast creature, rest ----
+fun nearest_creature(crs, px, py, best) {
+    if (length(crs) == 0) { best }
+    else {
+        c = hd(crs)
+        dx = g(c, 'x') - px
+        dy = g(c, 'y') - py
+        d = Math.sqrt(dx * dx + dy * dy)
+        nearest_creature(tl(crs), px, py, if (best == nil || d < hd(best)) { [d, g(c, 'id'), dx, dy] } else { best })
+    }
+}
+
+fun pred_one(s, pr) {
+    px = hd(pr)
+    py = nth(pr, 1)
+    mode = nth(pr, 2)
+    tm = nth(pr, 3)
+    tg = nearest_creature(g(s, 'crs'), px, py, nil)
+    d = if (tg == nil) { 9.0 } else { hd(tg) + 0.000001 }
+    dx = if (tg == nil) { 0.0 } else { nth(tg, 2) }
+    dy = if (tg == nil) { 0.0 } else { nth(tg, 3) }
+    mode2 = if (mode == 0) { if (d < 0.30 && tm <= 0) { 3 } else { 0 } }
+            else { if (mode == 3) { if (tm <= 0) { if (d < 0.40) { 1 } else { 0 } } else { 3 } }
+            else { if (mode == 1) { if (tm <= 0 || tg == nil || d > 0.45) { 2 } else { 1 } }
+            else { if (tm <= 0) { 0 } else { 2 } } } }
+    tm2 = if (mode2 != mode) { if (mode2 == 3) { 55 } else { if (mode2 == 1) { 110 } else { if (mode2 == 2) { 170 } else { 60 } } } } else { tm - 1 }
+    wh = rotate_h(nth(pr, 4), nth(pr, 5), (rndf() - 0.5) * 0.3)
+    face = (mode2 == 1 || mode2 == 3) && tg != nil
+    hx = if (face) { dx / d } else { elem(wh, 0) }
+    hy = if (face) { dy / d } else { elem(wh, 1) }
+    speed = if (mode2 == 1) { 0.0085 } else { if (mode2 == 0) { 0.003 } else { 0.0 } }
+    nx = clampw(px + hx * speed)
+    ny = clampw(py + hy * speed)
+    if (mode2 == 1 && tg != nil && d < 0.045) {
+        tid = nth(tg, 1)
+        crs2 = upd(g(s, 'crs'), tid, fun(c) { p(p(p(p(p(c, 'h', g(c, 'h') - 45.0 / (1.0 + nth(g(c, 'ph'), 2))), 'pain', 10), 'killer', 0 - 1),
+                                                'x', clampw(g(c, 'x') + dx / d * 0.08)), 'y', clampw(g(c, 'y') + dy / d * 0.08)) })
+        {p(s, 'crs', crs2), [nx, ny, 2, 170, hx, hy]}
+    } else { {s, [nx, ny, mode2, tm2, hx, hy]} }
+}
+
+fun preds_step(s, lst, acc) {
+    if (length(lst) == 0) { p(s, 'preds', acc) }
+    else { r = pred_one(s, hd(lst))  preds_step(elem(r, 0), tl(lst), [elem(r, 1) | acc]) }
+}
+
+# ---- metabolism: body, brain size and wiring all cost energy ----
+fun vitals(c) {
+    ph = g(c, 'ph')
+    sz = nth(ph, 0)
+    cost = 0.012 + 0.018 * sz * sz + 0.0016 * to_float(g(c, 'nn')) + 0.0004 * to_float(g(c, 'nc')) +
+           0.006 * nth(ph, 2) + 0.005 * nth(ph, 3) + 0.02 * nth(ph, 4) + 0.03 * nth(ph, 11)
+    regen = g(c, 'e') > 40.0 && g(c, 'h') < 100.0
+    p(p(p(p(p(p(p(c, 'e', g(c, 'e') - cost - (if (regen) { 0.02 } else { 0.0 })), 'h', if (regen) { fmin(100.0, g(c, 'h') + 0.05) } else { g(c, 'h') }),
+      'age', g(c, 'age') + 1), 'cool', g(c, 'cool') - 1), 'acd', g(c, 'acd') - 1), 'pain', if (g(c, 'pain') > 0) { g(c, 'pain') - 1 } else { 0 }), 'sv', g(c, 'sv'))
+}
+
+fun map_vitals(crs, acc) { if (length(crs) == 0) { acc } else { map_vitals(tl(crs), [vitals(hd(crs)) | acc]) } }
+
+# ---- death: the brain's processes stop, the body becomes meat ----
+fun reap(s, crs, keep) {
+    if (length(crs) == 0) { p(s, 'crs', keep) }
+    else {
+        c = hd(crs)
+        starved = g(c, 'e') <= 0.0
+        slain = g(c, 'h') <= 0.0
+        old = g(c, 'age') >= g(c, 'life')
+        if (starved || slain || old) {
+            kill_brain(c)
+            why = if (slain) { if (g(c, 'killer') > 0) { 6 } else { 5 } } else { if (starved) { 4 } else { 8 } }
+            key = if (why == 6) { 'd_eaten' } else { if (why == 5) { 'd_pred' } else { if (why == 4) { 'd_starve' } else { 'd_old' } } }
+            meat = [g(c, 'x'), g(c, 'y'), 14.0 + 26.0 * nth(g(c, 'ph'), 0), 520]
+            s1 = p(p(p(p(s, key, g(s, key) + 1), 'free', [g(c, 'slot') | g(s, 'free')]), 'meat', [meat | g(s, 'meat')]),
+                   'hof', hof_add(g(s, 'hof'), c))
+            reap(p(s1, 'evs', [[why, g(c, 'slot'), Math.round(nth(g(c, 'ph'), 6)), g(c, 'gen'), g(c, 'age'), g(c, 'kids')] | g(s1, 'evs')]), tl(crs), keep)
+        } else { reap(s, tl(crs), [c | keep]) }
+    }
+}
+
+fun age_meat(lst) {
+    if (length(lst) == 0) { [] }
+    else { it = hd(lst)  if (nth(it, 3) <= 1) { age_meat(tl(lst)) } else { [[hd(it), nth(it, 1), nth(it, 2), nth(it, 3) - 1] | age_meat(tl(lst))] } }
+}
+
+# hall of fame: the genomes that left the most children
+fun hof_score(c) { to_float(g(c, 'kids')) * 3.0 + to_float(g(c, 'kills')) + to_float(g(c, 'age')) / 600.0 }
+fun hof_add(h, c) {
+    sc = hof_score(c)
+    if (g(c, 'kids') < 1) { h }
+    else {
+        h2 = hof_ins(h, [sc, g(c, 'ha'), g(c, 'hb'), g(c, 'gen'), g(c, 'sp'), Math.round(nth(g(c, 'ph'), 6))])
+        if (length(h2) > 8) { Std.take(h2, 8) } else { h2 }
+    }
+}
+fun hof_ins(h, e) { if (length(h) == 0) { [e] } else { if (hd(e) >= hd(hd(h))) { [e | h] } else { [hd(h) | hof_ins(tl(h), e)] } } }
+
+# ---- birth ----
+fun birth(tab, world, s, ha, hb, gen, sp, x, y, e, mom, dad, kind) {
+    fr = g(s, 'free')
+    if (length(fr) == 0 || length(g(s, 'crs')) >= pop_cap) { s }
+    else {
+        c = make_creature(tab, world, s, ha, hb, hd(fr), gen, sp, x, y, e, mom, dad)
+        key = if (kind == 1) { 'b_sex' } else { if (kind == 2) { 'b_bud' } else { 'b_imm' } }
+        s0 = p(p(p(s, 'crs', [c | g(s, 'crs')]), 'free', tl(fr)), 'next_id', g(s, 'next_id') + 1)
+        s1 = if (kind == 0) { s0 } else { p(s0, key, g(s0, key) + 1) }
+        s2 = p(s1, 'maxgen', if (gen > g(s1, 'maxgen')) { gen } else { g(s1, 'maxgen') })
+        if (kind == 0) { s2 } else { p(s2, 'evs', [[7, g(c, 'slot'), Math.round(nth(g(c, 'ph'), 6)), gen, kind, g(c, 'nn')] | g(s2, 'evs')]) }
+    }
+}
+
+fun eligible(c) { g(c, 'mate') == 1 && g(c, 'e') >= nth(g(c, 'ph'), 17) && g(c, 'age') >= 150 && g(c, 'cool') <= 0 }
+
+fun find_mate(crs, c, best) {
+    if (length(crs) == 0) { best }
+    else {
+        o = hd(crs)
+        dx = g(o, 'x') - g(c, 'x')
+        dy = g(o, 'y') - g(c, 'y')
+        d = Math.sqrt(dx * dx + dy * dy)
+        gd = body_dist(g(c, 'ph'), g(o, 'ph'), 0)
+        ok = g(o, 'id') != g(c, 'id') && d < 0.06 && eligible(o) && gd <= fmin(nth(g(c, 'ph'), 18), nth(g(o, 'ph'), 18))
+        find_mate(tl(crs), c, if (ok && (best == nil || d < elem(best, 0))) { {d, o} } else { best })
+    }
+}
+
+fun pay(crs, id, cost, kid) { upd(crs, id, fun(c) { p(p(p(c, 'e', g(c, 'e') - cost), 'cool', 220), 'kids', g(c, 'kids') + kid) }) }
+
+fun breed(tab, world, s, ids) {
+    if (length(ids) == 0) { s }
+    else {
+        c = find_id(g(s, 'crs'), hd(ids))
+        if (c == nil || g(c, 'cool') > 0) { breed(tab, world, s, tl(ids)) }
+        else {
+            m = if (eligible(c)) { find_mate(g(s, 'crs'), c, nil) } else { nil }
+            if (m != nil) {
+                o = elem(m, 1)
+                ga = gamete(g(c, 'ha'), g(c, 'hb'), nth(g(c, 'ph'), 10))
+                gb = gamete(g(o, 'ha'), g(o, 'hb'), nth(g(o, 'ph'), 10))
+                gen = (if (g(c, 'gen') > g(o, 'gen')) { g(c, 'gen') } else { g(o, 'gen') }) + 1
+                s1 = birth(tab, world, s, ga, gb, gen, g(c, 'sp'), clampw(g(c, 'x') + gauss() * 0.02), clampw(g(c, 'y') + gauss() * 0.02), 40.0, g(c, 'id'), g(o, 'id'), 1)
+                born = length(g(s1, 'crs')) > length(g(s, 'crs'))
+                s2 = if (born) { p(s1, 'crs', pay(pay(g(s1, 'crs'), g(c, 'id'), 18.0, 1), g(o, 'id'), 18.0, 1)) } else { s1 }
+                breed(tab, world, s2, tl(ids))
+            } else { if (g(c, 'e') >= 97.0 && g(c, 'age') >= 600) {
+                ga = gamete(g(c, 'ha'), g(c, 'hb'), nth(g(c, 'ph'), 10))
+                gb = gamete(g(c, 'ha'), g(c, 'hb'), nth(g(c, 'ph'), 10))
+                s1 = birth(tab, world, s, ga, gb, g(c, 'gen') + 1, g(c, 'sp'), clampw(g(c, 'x') + gauss() * 0.02), clampw(g(c, 'y') + gauss() * 0.02), 35.0, g(c, 'id'), g(c, 'id'), 2)
+                born = length(g(s1, 'crs')) > length(g(s, 'crs'))
+                breed(tab, world, if (born) { p(s1, 'crs', pay(g(s1, 'crs'), g(c, 'id'), 60.0, 1)) } else { s1 }, tl(ids))
+            } else { breed(tab, world, s, tl(ids)) } }
+        }
+    }
+}
+
+fun ids_of(crs) { if (length(crs) == 0) { [] } else { [g(hd(crs), 'id') | ids_of(tl(crs))] } }
+
+# immigrants keep a dying world going: a champion's genome (selfed) or a fresh random one
+fun immigrate(tab, world, s) {
+    h = g(s, 'hof')
+    pos = free_pos(20)
+    if (length(h) > 0 && rndf() < 0.7) {
+        e = nth(h, rndi(length(h)))
+        birth(tab, world, s, gamete(nth(e, 1), nth(e, 2), 1.0), gamete(nth(e, 1), nth(e, 2), 1.0), nth(e, 3), nth(e, 4), hd(pos), nth(pos, 1), 70.0, 0, 0, 3)
+    } else {
+        fg = founder_genome()
+        birth(tab, world, s, elem(fg, 0), elem(fg, 1), 0, 0, hd(pos), nth(pos, 1), 70.0, 0, 0, 3)
+    }
+}
+
+# a new world is colonised by a few ancestral lineages, each founder a variant of one
+fun ancestors(k) { if (k <= 0) { [] } else { [random_hap() | ancestors(k - 1)] } }
+fun founders(tab, world, s, k) { founders_from(tab, world, s, k, ancestors(6)) }
+fun founders_from(tab, world, s, k, ancs) {
+    if (k <= 0) { s }
+    else {
+        a = nth(ancs, k % length(ancs))
+        pos = free_pos(20)
+        s1 = birth(tab, world, s, mutate_hap(a, 1.0), mutate_hap(a, 1.0), 0, 0, hd(pos), nth(pos, 1), 70.0, 0, 0, 3)
+        founders_from(tab, world, s1, k - 1, ancs)
+    }
+}
+fun immigrate_fresh(tab, world, s) {
+    fg = founder_genome()
+    pos = free_pos(20)
+    birth(tab, world, s, elem(fg, 0), elem(fg, 1), 0, 0, hd(pos), nth(pos, 1), 70.0, 0, 0, 3)
+}
+
+# ---- species: nearest type specimen within distance 1.1, else a new species ----
+fun sp_find(sps, ph) {
+    if (length(sps) == 0) { nil }
+    else { r = hd(sps)  if (body_dist(nth(r, 1), ph, 0) < 1.1) { r } else { sp_find(tl(sps), ph) } }
+}
+
+fun speciate(s, crs, sps, acc, t) {
+    if (length(crs) == 0) { {acc, sps, t} }
+    else {
+        c = hd(crs)
+        cur = find_sp(sps, g(c, 'sp'))
+        keep = cur != nil && body_dist(nth(cur, 1), g(c, 'ph'), 0) < 1.1
+        r = if (keep) { cur } else { sp_find(sps, g(c, 'ph')) }
+        if (r != nil) { speciate(s, tl(crs), sps, [p(c, 'sp', hd(r)) | acc], t) }
+        else {
+            sid = elem(t, 0)
+            sps2 = app(sps, [[sid, g(c, 'ph'), Math.round(nth(g(c, 'ph'), 6)), g(s, 'tick')]])
+            speciate(s, tl(crs), sps2, [p(c, 'sp', sid) | acc], {sid + 1, [[9, g(c, 'slot'), Math.round(nth(g(c, 'ph'), 6)), sid, 0, 0] | elem(t, 1)]})
+        }
+    }
+}
+
+fun find_sp(sps, sid) { if (length(sps) == 0) { nil } else { if (hd(hd(sps)) == sid) { hd(sps) } else { find_sp(tl(sps), sid) } } }
+
+fun sp_count(crs, sid, acc) { if (length(crs) == 0) { acc } else { sp_count(tl(crs), sid, if (g(hd(crs), 'sp') == sid) { acc + 1 } else { acc }) } }
+
+fun prune_sps(sps, crs, keep, evs) {
+    if (length(sps) == 0) { {rev(keep, []), evs} }
+    else {
+        r = hd(sps)
+        if (sp_count(crs, hd(r), 0) > 0) { prune_sps(tl(sps), crs, [r | keep], evs) }
+        else { prune_sps(tl(sps), crs, keep, [[10, 0, nth(r, 2), hd(r), 0, 0] | evs]) }
+    }
+}
+
+fun species_step(s) {
+    r = speciate(s, g(s, 'crs'), g(s, 'sps'), [], {g(s, 'sp_next'), []})
+    crs = elem(r, 0)
+    pr = prune_sps(elem(r, 1), crs, [], [])
+    p(p(p(p(s, 'crs', crs), 'sps', elem(pr, 0)), 'sp_next', elem(elem(r, 2), 0)), 'evs', app(elem(pr, 1), app(elem(elem(r, 2), 1), g(s, 'evs'))))
+}
+
+fun sp_rows(sps, crs) {
+    if (length(sps) == 0) { [] }
+    else { r = hd(sps)  [[hd(r), sp_count(crs, hd(r), 0), nth(r, 2)] | sp_rows(tl(sps), crs)] }
+}
+
+# ------------------------------------------------------------
+# Checkpoints: genomes only (brains are rebuilt from them; learned weights are not inherited)
+# ------------------------------------------------------------
+fun ck_creatures(crs) {
+    if (length(crs) == 0) { [] }
+    else { c = hd(crs)  [[g(c, 'ha'), g(c, 'hb'), g(c, 'gen'), g(c, 'sp')] | ck_creatures(tl(crs))] }
+}
+
+fun save(s, name) {
+    file_mkdir("checkpoints")
+    file_mkdir(ck_dir)
+    data = %{v: 3, tick: g(s, 'tick'), maxgen: g(s, 'maxgen'), sp_next: g(s, 'sp_next'),
+             b_sex: g(s, 'b_sex'), b_bud: g(s, 'b_bud'), b_imm: g(s, 'b_imm'),
+             d_starve: g(s, 'd_starve'), d_pred: g(s, 'd_pred'), d_eaten: g(s, 'd_eaten'), d_old: g(s, 'd_old'),
+             sps: g(s, 'sps'), hof: g(s, 'hof'), cr: ck_creatures(g(s, 'crs'))}
+    path = ck_dir ++ "/" ++ name
+    file_atomic_write(path, json_encode(data))
+    p(p(p(s, 'ck_tick', g(s, 'tick')), 'ck_note', name), 'evs', [[11, 0, 0, g(s, 'maxgen'), length(g(s, 'crs')), 0] | g(s, 'evs')])
+}
+
+fun fl(lst) { if (length(lst) == 0) { [] } else { [to_float(hd(lst)) | fl(tl(lst))] } }
+fun fix_body(lst) { if (length(lst) == 0) { [] } else { [[to_float(hd(hd(lst))), to_float(nth(hd(lst), 1))] | fix_body(tl(lst))] } }
+fun fix_ns(lst) { if (length(lst) == 0) { [] } else { n = hd(lst)  [[to_int(hd(n)), to_int(nth(n, 1)), to_float(nth(n, 2)), to_float(nth(n, 3))] | fix_ns(tl(lst))] } }
+fun fix_cs(lst) { if (length(lst) == 0) { [] } else { c = hd(lst)  [[to_int(hd(c)), to_int(nth(c, 1)), to_float(nth(c, 2))] | fix_cs(tl(lst))] } }
+fun fix_hap(h) { %{b: fix_body(g(h, 'b')), n: fix_ns(g(h, 'n')), c: fix_cs(g(h, 'c'))} }
+fun fix_sps(lst) { if (length(lst) == 0) { [] } else { r = hd(lst)  [[to_int(hd(r)), fl(nth(r, 1)), to_int(nth(r, 2)), to_int(nth(r, 3))] | fix_sps(tl(lst))] } }
+fun fix_hof(lst) {
+    if (length(lst) == 0) { [] }
+    else { e = hd(lst)  [[to_float(hd(e)), fix_hap(nth(e, 1)), fix_hap(nth(e, 2)), to_int(nth(e, 3)), to_int(nth(e, 4)), to_int(nth(e, 5))] | fix_hof(tl(lst))] }
+}
+
+fun load_crs(tab, world, s, lst) {
+    if (length(lst) == 0) { s }
+    else {
+        e = hd(lst)
+        pos = free_pos(20)
+        load_crs(tab, world, birth(tab, world, s, fix_hap(hd(e)), fix_hap(nth(e, 1)), to_int(nth(e, 2)), to_int(nth(e, 3)), hd(pos), nth(pos, 1), 70.0, 0, 0, 0), tl(lst))
+    }
+}
+
+fun load(tab, world, s, name) {
+    path = ck_dir ++ "/" ++ name
+    if (file_exists(path) != 'true') { s }
+    else {
+        d = json_decode(file_read(path))
+        if (d == nil || g(d, 'cr') == nil) { s }
+        else {
+            kill_all(g(s, 'crs'))
+            w0 = new_world()
+            w1 = p(p(p(p(p(p(p(p(p(p(p(w0, 'tick', to_int(g(d, 'tick'))), 'maxgen', to_int(g(d, 'maxgen'))), 'sp_next', to_int(g(d, 'sp_next'))),
+                  'b_sex', to_int(g(d, 'b_sex'))), 'b_bud', to_int(g(d, 'b_bud'))), 'b_imm', to_int(g(d, 'b_imm'))),
+                  'd_starve', to_int(g(d, 'd_starve'))), 'd_pred', to_int(g(d, 'd_pred'))), 'd_eaten', to_int(g(d, 'd_eaten'))), 'd_old', to_int(g(d, 'd_old'))),
+                  'sps', fix_sps(g(d, 'sps')))
+            w2 = p(p(p(w1, 'hof', fix_hof(g(d, 'hof'))), 'init', 1), 'ck_note', "resumed " ++ name)
+            w3 = load_crs(tab, world, w2, g(d, 'cr'))
+            p(p(w3, 'ck_tick', g(w3, 'tick')), 'evs', [[12, 0, 0, g(w3, 'maxgen'), length(g(w3, 'crs')), 0] | g(w3, 'evs')])
+        }
+    }
+}
+
+fun kill_all(crs) { if (length(crs) == 0) { 'ok' } else { kill_brain(hd(crs))  kill_all(tl(crs)) } }
+
+# ------------------------------------------------------------
+# The world loop
+# ------------------------------------------------------------
+fun world_loop(tab, s) {
+    cmd = cget(tab, 'cmd')
+    if (cmd != nil) { cput(tab, 'cmd', nil) } else { 'x' }
+    if (g(s, 'init') == 0) {
+        s1 = load(tab, self(), s, "latest.json")
+        s2 = if (length(g(s1, 'crs')) == 0) { founders(tab, self(), p(s1, 'init', 1), 70) } else { s1 }
+        drain_acks()
+        world_loop(tab, p(s2, 'init', 1))
+    } else { if (cmd == 'reset') {
+        kill_all(g(s, 'crs'))
+        drain_acks()
+        world_loop(tab, founders(tab, self(), p(new_world(), 'init', 1), 70))
+    } else { if (cmd == 'load') {
+        s1 = load(tab, self(), s, "latest.json")
+        drain_acks()
+        world_loop(tab, s1)
+    } else {
+        s0 = if (cmd == 'save') { save(s, "latest.json") } else { s }
+        world_loop(tab, step(tab, s0))
+    } } }
+}
+
+fun step(tab, s) {
+    t0 = timestamp()
+    sp = if (num(cget(tab, 'speed')) < 1) { 1 } else { num(cget(tab, 'speed')) }
+    plast = num(cget(tab, 'plast'))
+    s0 = p(s, 'pred_on', num(cget(tab, 'pred_on')))
+    drain_acks()
+    crs0 = sense_all(s0, g(s0, 'crs'), plast, [])
+    left = wait_acks(count_neurons(crs0, 0), 0)
+    crs1 = act_all(tab, crs0, [])
+    s1 = feed_all(p(s0, 'crs', []), crs1, [])
+    crs2 = fight(g(s1, 'crs'), g(s1, 'crs'))
+    s2 = if (g(s1, 'pred_on') == 1) { preds_step(p(s1, 'crs', crs2), g(s1, 'preds'), []) } else { p(s1, 'crs', crs2) }
+    s3 = reap(p(p(p(s2, 'crs', []), 'meat', age_meat(g(s2, 'meat'))), 'plants', grow_plants(g(s2, 'plants'), g(s2, 'tick'))), map_vitals(g(s2, 'crs'), []), [])
+    s4 = breed(tab, self(), s3, ids_of(g(s3, 'crs')))
+    tick = g(s4, 'tick') + 1
+    s5 = if (length(g(s4, 'crs')) < 30 && tick % 30 == 0) { immigrate(tab, self(), s4) } else { s4 }
+    s6 = if (tick % 40 == 0) { species_step(s5) } else { s5 }
+    s7 = if (tick - g(s6, 'ck_tick') >= 4000) { save(s6, "latest.json") } else { s6 }
+    every = if (sp == 1) { 1 } else { if (sp == 2) { 3 } else { 12 } }
+    emit = tick % every == 0
+    if (emit) { frame(tab, s7, tick, left, sp) } else { 'skip' }
+    spent = timestamp() - t0
+    period = if (sp == 1) { tick_ms } else { if (sp == 2) { 10 } else { 0 } }
+    if (spent < period) { sleep(period - spent) } else { 'late' }
+    p(p(s7, 'tick', tick), 'evs', if (emit) { [] } else { g(s7, 'evs') })
+}
+
+# ------------------------------------------------------------
+# Frames
+# ------------------------------------------------------------
+fun r3(v) { Math.round(v * 1000.0) }
+fun r2(v) { Math.round(v * 100.0) }
+
+fun cr_row(c) {
+    ph = g(c, 'ph')
+    [g(c, 'slot'), g(c, 'id'), g(c, 'sp'), Math.round(nth(ph, 6)), r3(g(c, 'x')), r3(g(c, 'y')), r3(g(c, 'hx')), r3(g(c, 'hy')),
+     Math.round(g(c, 'e')), Math.round(g(c, 'h')), r2(nth(ph, 0)), r2(nth(ph, 1)), r2(nth(ph, 2)), r2(nth(ph, 3)), r2(nth(ph, 4)),
+     r2(nth(ph, 5)), r2(nth(ph, 7)), r2(nth(ph, 8)), r2(nth(ph, 9)), r2(g(c, 'sig')), g(c, 'bite'), g(c, 'mate'),
+     g(c, 'gen'), g(c, 'age'), g(c, 'kids'), g(c, 'kills'), g(c, 'nn'), g(c, 'nc'), g(c, 'pain'), Math.round(nth(ph, 11) * 1000.0)]
+}
+
+fun cr_rows(crs) { if (length(crs) == 0) { [] } else { [cr_row(hd(crs)) | cr_rows(tl(crs))] } }
+
+fun plant_pts(lst) {
+    if (length(lst) == 0) { [] }
+    else { it = hd(lst)  if (nth(it, 2) > 0) { plant_pts(tl(lst)) } else { [[r3(hd(it)), r3(nth(it, 1))] | plant_pts(tl(lst))] } }
+}
+fun meat_pts(lst) { if (length(lst) == 0) { [] } else { it = hd(lst)  [[r3(hd(it)), r3(nth(it, 1)), Math.round(nth(it, 2))] | meat_pts(tl(lst))] } }
+fun pred_pts(lst) { if (length(lst) == 0) { [] } else { pr = hd(lst)  [[r3(hd(pr)), r3(nth(pr, 1)), nth(pr, 2), nth(pr, 3)] | pred_pts(tl(lst))] } }
+fun obst_pts(lst) { if (length(lst) == 0) { [] } else { o = hd(lst)  [[r3(hd(o)), r3(nth(o, 1)), r3(nth(o, 2))] | obst_pts(tl(lst))] } }
+
+fun sum_ph(crs, k, acc) { if (length(crs) == 0) { acc } else { sum_ph(tl(crs), k, acc + nth(g(hd(crs), 'ph'), k)) } }
+fun sum_k(crs, k, acc) { if (length(crs) == 0) { acc } else { sum_k(tl(crs), k, acc + to_float(g(hd(crs), k))) } }
+fun mean_ph(crs, k) { if (length(crs) == 0) { 0.0 } else { sum_ph(crs, k, 0.0) / to_float(length(crs)) } }
+fun mean_k(crs, k) { if (length(crs) == 0) { 0.0 } else { sum_k(crs, k, 0.0) / to_float(length(crs)) } }
+
+fun by_slot(crs, slot) { if (length(crs) == 0) { nil } else { if (g(hd(crs), 'slot') == slot) { hd(crs) } else { by_slot(tl(crs), slot) } } }
+
+fun best_slot(crs, best) {
+    if (length(crs) == 0) { if (best == nil) { -1 } else { g(best, 'slot') } }
+    else { c = hd(crs)  best_slot(tl(crs), if (best == nil || g(c, 'kids') * 1000 + g(c, 'age') > g(best, 'kids') * 1000 + g(best, 'age')) { c } else { best }) }
+}
+
+fun r2l(lst) { if (length(lst) == 0) { [] } else { [r2(hd(lst)) | r2l(tl(lst))] } }
+
+# body loci normalised 0..100 with dominance 0..100, for the chromosome view
+fun kar(b, k) {
+    if (length(b) == 0) { [] }
+    else { [[Math.round((hd(hd(b)) - lo(k)) / (hi(k) - lo(k)) * 100.0), Math.round(nth(hd(b), 1) * 100.0)] | kar(tl(b), k + 1)] }
+}
+
+fun net_edges(tab, c, k, inls) {
+    if (length(inls) == 0) { [] }
+    else {
+        cur = tget(tab, k_w + g(c, 'slot') * nmax + k)
+        app(edges_of(hd(inls), if (cur == nil) { hd(inls) } else { cur }, k), net_edges(tab, c, k + 1, tl(inls)))
+    }
+}
+fun edges_of(innate, cur, dst) {
+    if (length(innate) == 0 || length(cur) == 0) { [] }
+    else { e = hd(innate)  [[hd(e), dst, nth(e, 1), r2(nth(e, 2)), r2(nth(hd(cur), 2))] | edges_of(tl(innate), tl(cur), dst)] }
+}
+
+fun frame(tab, s, tick, left, sp) {
+    st = swarm_stats()
+    crs = g(s, 'crs')
+    want = num(cget(tab, 'sel'))
+    sel = if (by_slot(crs, want) != nil) { want } else { best_slot(crs, nil) }
+    if (sel != want) { cput(tab, 'sel', sel) } else { 'x' }
+    sc = if (sel >= 0) { by_slot(crs, sel) } else { nil }
+    full = tick % 15 == 0 || num(cget(tab, 'sel_dirty')) == 1
+    if (full) { cput(tab, 'sel_dirty', 0) } else { 'x' }
+    nn = count_neurons(crs, 0)
+    nc = count_conns(crs, 0)
+    LiveView.broadcast("evolve3", {'frame', json_encode(%{t: "ev", n: "frame", d: %{
+        tick: tick, cr: cr_rows(crs), sel: sel,
+        acts: if (sc != nil) { r2l(read_acts(tab, sel, 0, g(sc, 'nn'))) } else { [] },
+        sens: if (sc != nil) { r2l(list_or_empty(g(sc, 'sv'))) } else { [] },
+        net: if (sc != nil && full) { %{id: g(sc, 'id'), types: g(sc, 'types'), e: net_edges(tab, sc, 0, g(sc, 'inl'))} } else { nil },
+        kar: if (sc != nil && full) { %{a: kar(g(g(sc, 'ha'), 'b'), 0), b: kar(g(g(sc, 'hb'), 'b'), 0),
+                                        an: [length(g(g(sc, 'ha'), 'n')), length(g(g(sc, 'ha'), 'c'))], bn: [length(g(g(sc, 'hb'), 'n')), length(g(g(sc, 'hb'), 'c'))],
+                                        mom: g(sc, 'mom'), dad: g(sc, 'dad')} } else { nil },
+        plants: plant_pts(g(s, 'plants')), meat: meat_pts(g(s, 'meat')), preds: if (g(s, 'pred_on') == 1) { pred_pts(g(s, 'preds')) } else { [] },
+        obst: if (tick % 30 == 0) { obst_pts(obstacles()) } else { nil },
+        pop: length(crs), maxgen: g(s, 'maxgen'), b_sex: g(s, 'b_sex'), b_bud: g(s, 'b_bud'), b_imm: g(s, 'b_imm'),
+        d_starve: g(s, 'd_starve'), d_pred: g(s, 'd_pred'), d_eaten: g(s, 'd_eaten'), d_old: g(s, 'd_old'),
+        sps: sp_rows(g(s, 'sps'), crs),
+        mean: [r2(mean_ph(crs, 0)), r2(mean_ph(crs, 1)), r2(mean_ph(crs, 2)), r2(mean_ph(crs, 3)), r2(mean_ph(crs, 4)), r2(mean_ph(crs, 5)),
+               r2(mean_ph(crs, 10)), Math.round(mean_ph(crs, 11) * 1000.0), r2(mean_k(crs, 'nn')), r2(mean_k(crs, 'nc'))],
+        forage: Math.round(sum_k(crs, 'eaten', 0.0) * 100000.0 / (sum_k(crs, 'age', 0.0) + 1.0)),
+        nn: nn, nc: nc, procs: num(map_get(st, 'processes')), late: left,
+        speed: sp, pred_on: g(s, 'pred_on'), plast: num(cget(tab, 'plast')),
+        ck: g(s, 'ck_note'), ck_tick: g(s, 'ck_tick'), hof: length(g(s, 'hof')),
+        evs: g(s, 'evs')
+    }})})
+}
+
+# ------------------------------------------------------------
+# Commands and view
+# ------------------------------------------------------------
+fun inbox(tab) {
+    receive {
+        {'set', k, v} ->
+            cput(tab, k, v)
+            inbox(tab)
+        {'toggle', k} ->
+            cput(tab, k, 1 - num(cget(tab, k)))
+            inbox(tab)
+        {'cmd', c} ->
+            cput(tab, 'cmd', c)
+            inbox(tab)
+        _o -> inbox(tab)
+    }
+}
+
+fun inbox_send(msg) {
+    a = whereis('evolve3_in')
+    if (a == nil) { 'noop' } else { send(a, msg) }
+}
+
+fun mount(params) {
+    if (LiveView.connected(params) == 'true') { LiveView.subscribe("evolve3") } else { 'noop' }
+    %{}
+}
+
+fun handle_event(name, value, assigns) {
+    if (name == "sel") { inbox_send({'set', 'sel', to_int(map_get(value, 'slot'))})  inbox_send({'set', 'sel_dirty', 1}) }
+    else { if (name == "speed") { inbox_send({'set', 'speed', to_int(map_get(value, 'k'))}) }
+    else { if (name == "pred") { inbox_send({'toggle', 'pred_on'}) }
+    else { if (name == "plast") { inbox_send({'toggle', 'plast'}) }
+    else { if (name == "save") { inbox_send({'cmd', 'save'}) }
+    else { if (name == "load") { inbox_send({'cmd', 'load'}) }
+    else { if (name == "reset") { inbox_send({'cmd', 'reset'}) }
+    else { 'noop' } } } } } } }
+    assigns
+}
+
+fun handle_info(msg, assigns) {
+    conn = map_get(assigns, '_conn')
+    if (conn != nil && elem(msg, 0) == 'frame') { ws_send(conn, elem(msg, 1)) } else { 'noop' }
+    assigns
+}
+
+fun stat(id, label) {
+    "<div class=\"card stat\"><div class=\"lbl\">" ++ label ++ "</div><div class=\"val\" id=\"v-" ++ id ++ "\">&ndash;</div><div class=\"chip\" id=\"d-" ++ id ++ "\"></div></div>"
+}
+
+fun css() {
+    "<style>" ++
+    ":root{--bg:#000;--card:#0a0a0a;--line:#1f1f1f;--line2:#2e2e2e;--tx:#ededed;--mu:#8f8f8f;--blue:#3b9eff;--red:#ff4d4d;--green:#50e3c2;--amber:#f5a623;--violet:#a78bfa}" ++
+    "*{box-sizing:border-box}html,body{height:100%;background:var(--bg);color:var(--tx);margin:0}" ++
+    "body{font-family:ui-sans-serif,-apple-system,'SF Pro Text',Inter,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden}" ++
+    "#live-root{height:100%;display:flex;flex-direction:column}" ++
+    ".nav{height:52px;flex:none;display:flex;align-items:center;gap:14px;padding:0 22px;border-bottom:1px solid var(--line)}" ++
+    ".logo{display:flex;align-items:center;gap:10px;font-weight:600;font-size:14px}.crumb{color:var(--mu);font-size:13px}.crumb:before{content:'/';margin-right:14px;color:#3a3a3a}" ++
+    ".pill{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mu);padding:5px 11px;border:1px solid var(--line2);border-radius:99px;white-space:nowrap}.live{margin-left:auto}" ++
+    ".dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 1.8s infinite}" ++
+    "@keyframes pulse{70%{box-shadow:0 0 0 7px rgba(80,227,194,0)}100%{box-shadow:0 0 0 0 rgba(80,227,194,0)}}" ++
+    ".main{flex:1;min-height:0;padding:14px 22px 18px;display:flex;flex-direction:column;gap:12px}" ++
+    ".cards{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;flex:none}" ++
+    ".card{background:var(--card);border:1px solid var(--line);border-radius:12px}" ++
+    ".stat{padding:10px 13px;height:80px}.lbl{font-size:11.5px;color:var(--mu)}" ++
+    ".val{font-size:24px;font-weight:600;letter-spacing:-.03em;font-variant-numeric:tabular-nums;margin-top:2px}" ++
+    ".chip{font-size:10.5px;color:var(--mu);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.chip.up{color:var(--green)}.chip.bad{color:var(--red)}.chip.warn{color:var(--amber)}" ++
+    ".body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr) 300px;gap:12px}" ++
+    ".pane{position:relative;overflow:hidden;background:#05060a;min-height:0}.pane canvas{position:absolute;inset:0}" ++
+    ".ph{position:absolute;top:11px;left:13px;right:13px;font-size:12px;color:var(--mu);pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ph b{color:var(--tx)}" ++
+    ".mid{display:grid;grid-template-rows:minmax(0,1.25fr) minmax(0,1fr);gap:12px;min-height:0}" ++
+    ".col{display:flex;flex-direction:column;gap:10px;min-height:0;overflow:auto;scrollbar-width:none}" ++
+    ".col .card{padding:11px 13px;flex:none}.col h3{font-size:12px;font-weight:600;margin:0 0 8px;display:flex;justify-content:space-between;gap:8px}.col h3 span{color:var(--mu);font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" ++
+    ".chart{width:100%;height:84px;display:block}" ++
+    "#log{font:11.5px/1.5 ui-sans-serif,-apple-system,sans-serif;height:150px;overflow:hidden}" ++
+    ".ev{display:flex;gap:8px;padding:2px 0;animation:in .3s ease}.ev i{width:7px;height:7px;border-radius:2px;margin-top:5px;flex:none}" ++
+    "@keyframes in{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}" ++
+    ".row2{display:flex;gap:6px;margin-bottom:6px}.btn{flex:1;font:inherit;font-size:11.5px;font-weight:500;color:var(--tx);background:#111;border:1px solid var(--line2);border-radius:8px;padding:7px 6px;cursor:pointer;transition:background .12s,border-color .12s,transform .06s}" ++
+    ".btn:hover{background:#1a1a1a;border-color:#444}.btn:active{transform:scale(.97)}.btn.on{background:#e6e6e6;color:#06070a;border-color:#e6e6e6}" ++
+    ".btn.danger{color:#ff9a9a;border-color:#5b2020;background:#1a0b0b}.btn.danger:hover{background:#2a1010;border-color:var(--red)}" ++
+    ".how{font-size:11.5px;color:var(--mu);line-height:1.55;margin:0}.how b{color:var(--tx);font-weight:600}" ++
+    ".sp{display:flex;flex-wrap:wrap;gap:5px 10px;font-size:11px;color:var(--mu);margin-top:6px}.sp i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:-1px}" ++
+    ".toast{position:absolute;right:14px;bottom:12px;font-size:11.5px;padding:6px 10px;border-radius:8px;background:#0f1a17;border:1px solid #1d4d40;color:var(--green);opacity:0;transform:translateY(6px);transition:all .3s;pointer-events:none}.toast.show{opacity:1;transform:none}" ++
+    "@media(max-width:1180px){.cards{grid-template-columns:repeat(3,1fr)}.body{grid-template-columns:1fr}.mid{grid-template-rows:420px 300px}body{overflow:auto}#live-root{height:auto}.pane.world{height:560px}}" ++
+    "</style>"
+}
+
+fun render(assigns) {
+    LiveView.h(
+        css() ++
+        "<header class=\"nav\"><div class=\"logo\">" ++
+        "<svg width=\"20\" height=\"20\" viewBox=\"0 0 10 10\" shape-rendering=\"crispEdges\"><path fill=\"#50e3c2\" d=\"M3 1h4v1h1v1h1v4H8v1H7v1H3V8H2V7H1V3h1V2h1z\"/><path fill=\"#05060a\" d=\"M3 4h1v1H3zM6 4h1v1H6z\"/><path fill=\"#a78bfa\" d=\"M4 6h2v1H4z\"/></svg>" ++
+        "Evolution 3</div><span class=\"crumb\">evolved brains, diploid genes, no teacher</span>" ++
+        "<div class=\"pill live\"><span class=\"dot\"></span>live &middot; <span id=\"o-fps\">0</span> fps &middot; <span id=\"o-tps\">0</span> ticks/s</div>" ++
+        "<div class=\"pill\" id=\"o-ck\">checkpoint &ndash;</div></header>" ++
+        "<div class=\"main\"><div class=\"cards\">" ++
+        stat("pop", "Population") ++ stat("gen", "Generations") ++ stat("sp", "Species alive") ++
+        stat("procs", "Neuron processes") ++ stat("msgs", "Synapse messages / s") ++ stat("death", "Deaths") ++
+        "</div><div class=\"body\">" ++
+        "<div class=\"card pane world\" id=\"arena\"><canvas id=\"arena-cv\" sw-keep></canvas><div class=\"ph\" id=\"ah\" sw-keep>the world</div><div class=\"toast\" id=\"toast\" sw-keep></div></div>" ++
+        "<div class=\"mid\">" ++
+        "<div class=\"card pane\" id=\"brain\"><canvas id=\"brain-cv\" sw-keep></canvas><div class=\"ph\" id=\"bh\" sw-keep>click a creature to see its brain</div></div>" ++
+        "<div class=\"card pane\" id=\"gene\"><canvas id=\"gene-cv\" sw-keep></canvas><div class=\"ph\" id=\"gh\" sw-keep>its two copies of every gene</div></div>" ++
+        "</div><div class=\"col\">" ++
+        "<div class=\"card\"><h3>Species <span id=\"h-sp\"></span></h3><canvas id=\"sp-cv\" class=\"chart\" style=\"height:96px\" sw-keep></canvas><div class=\"sp\" id=\"sp-leg\" sw-keep></div></div>" ++
+        "<div class=\"card\"><h3>Evolving traits <span>population mean</span></h3><canvas id=\"tr-cv\" class=\"chart\" sw-keep></canvas><div class=\"sp\" id=\"tr-leg\" sw-keep></div></div>" ++
+        "<div class=\"card\"><h3>Life and death</h3><div id=\"log\" sw-keep></div></div>" ++
+        "<div class=\"card\"><h3>Controls</h3>" ++
+        "<div class=\"row2\"><button class=\"btn\" data-speed=\"1\">1x</button><button class=\"btn\" data-speed=\"2\">fast</button><button class=\"btn\" data-speed=\"3\">turbo</button></div>" ++
+        "<div class=\"row2\"><button class=\"btn on\" id=\"b-pred\">Predators: on</button><button class=\"btn on\" id=\"b-plast\">Learning: on</button></div>" ++
+        "<div class=\"row2\"><button class=\"btn\" id=\"b-save\">Save checkpoint</button><button class=\"btn\" id=\"b-load\">Load checkpoint</button></div>" ++
+        "<div class=\"row2\" style=\"margin-bottom:0\"><button class=\"btn danger\" id=\"b-reset\">New random world</button></div></div>" ++
+        "<div class=\"card\"><h3>What is real here</h3><p class=\"how\">No expert, no fitness function. Each brain is <b>built from the genome</b>: rate, spiking and modulatory neurons, every one a <b>swarmrt process</b>. Synapses learn in a lifetime by an <b>evolved rule</b> (not inherited). Genes are <b>diploid</b>: two copies, dominance, crossover, mutation. Mates must be genetically close, so <b>species</b> split. Every neuron and synapse costs energy. The world is saved to disk and resumes.</p></div>" ++
+        "</div></div></div>",
+        [])
+}
+
+fun main() {
+    tab = make_tables(ets_new(), 16)
+    cput(tab, 'pred_on', 1)
+    cput(tab, 'plast', 1)
+    cput(tab, 'speed', 1)
+    cput(tab, 'sel', 0 - 1)
+    world = spawn(world_loop(tab, new_world()))
+    register('evolve3_world', world)
+    register('evolve3_in', spawn(inbox(tab)))
+    LiveView.start(4016, [
+        {"/", %{
+            title: "Evolution 3",
+            js: Evolve3Js.js(),
+            mount: mount,
+            render: render,
+            handle_event: handle_event,
+            handle_info: handle_info
+        }}
+    ])
+}
