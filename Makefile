@@ -3,10 +3,10 @@
 
 SWC ?= ../swarmrt/bin/swc
 
-EXAMPLES := counter todo router chat feed showcase canvas arena flock observer_demo life brain creature
+EXAMPLES := counter todo router chat feed showcase canvas arena flock observer_demo life brain creature evolve
 BINS := $(addprefix bin/,$(EXAMPLES))
 
-LIB_SOURCES := src/LiveView.sw src/UI.sw src/Client.sw src/ArenaJs.sw src/FlockJs.sw src/ObserverJs.sw src/Observer.sw src/LifeJs.sw src/BrainJs.sw src/CreatureJs.sw
+LIB_SOURCES := src/LiveView.sw src/UI.sw src/Client.sw src/ArenaJs.sw src/FlockJs.sw src/ObserverJs.sw src/Observer.sw src/LifeJs.sw src/BrainJs.sw src/CreatureJs.sw src/EvolveJs.sw
 
 .PHONY: all clean run-%
 

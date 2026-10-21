@@ -87,7 +87,7 @@
     var ah = $('ah'); if (ah) ah.innerHTML = d.dead ? '<b>' + (d.cause || 'dead') + '</b> &middot; respawning...' : '<b>the world</b> &middot; creature lives ' + Math.round(d.life / 40) + 's';
     var bh = $('bh'); if (bh) bh.innerHTML = '<b>' + fmtc(N) + '</b> neurons &middot; three regions &middot; each spike is a message';
     var sz = document.querySelectorAll('[data-size]'); for (i = 0; i < sz.length; i++) sz[i].classList.toggle('on', Number(sz[i].getAttribute('data-size')) === N);
-    tog('b-learn', 'Plasticity: ', d.learn); tog('b-auto', 'Autopilot: ', d.auto); tog('b-pred', 'Predator: ', d.pred_on);
+    tog('b-learn', 'Plasticity: ', d.learn); var bm = $('b-mode'); if (bm) { bm.textContent = d.mode ? 'Learning: reward (experimental)' : 'Learning: imitate'; bm.classList.toggle('on', !!d.mode); } tog('b-auto', 'Autopilot: ', d.auto); tog('b-pred', 'Predator: ', d.pred_on);
     var ha = $('h-acc'); if (ha) ha.textContent = (d.acc / 10).toFixed(0) + '% agree';
     var hp = $('h-auto'); if (hp) hp.innerHTML = d.auto ? (d.share > 50 ? 'The <b>expert autopilot</b> is driving ' + Math.round(d.share / 10) + '% of the time. As the brain learns to copy it, this falls toward 0%.' : 'The <b>brain is driving</b> on its own.') : 'Autopilot is <b>off</b>: the brain drives alone.';
   };
@@ -115,7 +115,7 @@
 
   /* ---------- controls ---------- */
   document.addEventListener('click', function (e) {
-    var t = e.target.closest ? e.target.closest('[data-size],[data-lesion],#b-learn,#b-forget,#b-auto,#b-pred') : null;
+    var t = e.target.closest ? e.target.closest('[data-size],[data-lesion],#b-learn,#b-forget,#b-auto,#b-pred,#b-mode') : null;
     if (!t) return;
     if (t.hasAttribute('data-size')) { var bh = $('bh'); if (bh) bh.innerHTML = 'growing a new brain...'; window.swSend('size', { n: Number(t.getAttribute('data-size')) }); }
     else if (t.hasAttribute('data-lesion')) window.swSend('lesion', { p: Number(t.getAttribute('data-lesion')) });
@@ -123,6 +123,7 @@
     else if (t.id === 'b-forget') { hist = []; shist = []; window.swSend('forget', {}); }
     else if (t.id === 'b-auto') window.swSend('auto', {});
     else if (t.id === 'b-pred') window.swSend('pred', {});
+    else if (t.id === 'b-mode') { hist = []; shist = []; window.swSend('mode', {}); }
   });
 
   /* ---------- draw: the world ---------- */

@@ -140,21 +140,39 @@ fun wkey(m, i) { k_weight + m * 100000 + i }
 
 fun motor(m, tab, world) {
     tput(tab, k_motor + m, self())
-    motor_loop(m, tab, world, 0.0, 0, [])
+    motor_loop(m, tab, world, 0.0, 0, [], [], 0.0)
 }
 
-fun motor_loop(m, tab, world, y, cnt, recs) {
+# firing bias per motor: forward is easy to fire, turns and boost need evidence
+fun bias(m) { if (m == 0) { 0.0 } else { if (m == 3) { 0.9 } else { 0.5 } } }
+fun sigmoid(x) { 1.0 / (1.0 + Math.exp(0.0 - x)) }
+
+# y     = sum of the readout weights of the neurons that spiked this tick
+# recs  = those {neuron, weight} pairs;  prev / padv = last tick's, for delayed credit
+fun motor_loop(m, tab, world, y, cnt, recs, prev, padv) {
     receive {
         {'r', i} ->
             w = numf(tget(tab, wkey(m, i)))
-            motor_loop(m, tab, world, y + w, cnt + 1, [{i, w} | recs])
-        {'tick', t} ->
-            target = if (t == 1) { 1.4 } else { 0.0 }
-            if (num(cget(tab, 'learn')) == 1 && cnt > 0) {
-                adjust(tab, m, recs, 0.09 * (target - y) / to_float(cnt))
-            } else { 'frozen' }
-            if (y >= 0.7) { send(world, {'m', m}) } else { 'quiet' }
-            motor_loop(m, tab, world, 0.0, 0, [])
+            motor_loop(m, tab, world, y + w, cnt + 1, [{i, w} | recs], prev, padv)
+        {'tick', t, reward} ->
+            learn = num(cget(tab, 'learn'))
+            if (num(cget(tab, 'mode')) == 0) {
+                # imitation: normalised delta rule toward the expert's command
+                target = if (t == 1) { 1.4 } else { 0.0 }
+                if (learn == 1 && cnt > 0) { adjust(tab, m, recs, 0.09 * (target - y) / to_float(cnt)) } else { 'frozen' }
+                if (y >= 0.7) { send(world, {'m', m}) } else { 'quiet' }
+                motor_loop(m, tab, world, 0.0, 0, [], [], 0.0)
+            } else {
+                # reward: credit last tick's action. dw = eta * reward * (action - p) for the synapses
+                # that were active then. Then act again, stochastically.
+                if (learn == 1 && length(prev) > 0 && reward != 0.0) {
+                    adjust(tab, m, prev, 0.30 * reward * padv / to_float(length(prev)))
+                } else { 'no credit' }
+                pr = sigmoid(4.0 * (y - bias(m)))
+                act = if (rndf() < pr) { 1 } else { 0 }
+                if (act == 1) { send(world, {'m', m}) } else { 'quiet' }
+                motor_loop(m, tab, world, 0.0, 0, [], recs, to_float(act) - pr)
+            }
         {'stop'} -> 'ok'
     }
 }
@@ -259,7 +277,7 @@ fun new_world() {
     %{x: 0.5, y: 0.5, hx: 1.0, hy: 0.0, e: 80.0, h: 100.0, pain: 0, bump: 0, dead: 0, life: 0, best: 0,
       eaten: 0, poisoned: 0, bitten: 0, deaths: 0, cause: "",
       food: init_items(10, 0), poison: init_items(6, 0), pred: [0.88, 0.88, 0, 80, 0.0 - 1.0, 0.0],
-      acc: 0.5, share: 0.85, ev: [], pred_on: 1}
+      acc: 0.5, share: 0.85, ev: [], pred_on: 1, rew: 0.0, rema: 0.0, fc: 0.0, pc: 0.0, dc: 0.0}
 }
 
 # ---- vision: cast a ray, find the nearest thing ----
@@ -653,12 +671,12 @@ fun tick_all(tab, i, n) {
     }
 }
 
-fun tick_motors(tab, m, cmd) {
+fun tick_motors(tab, m, cmd, reward) {
     if (m >= 4) { 'ok' }
     else {
         t = tget(tab, k_motor + m)
-        if (t == nil) { 'skip' } else { send(t, {'tick', elem(cmd, m)}) }
-        tick_motors(tab, m + 1, cmd)
+        if (t == nil) { 'skip' } else { send(t, {'tick', elem(cmd, m), reward}) }
+        tick_motors(tab, m + 1, cmd, reward)
     }
 }
 
@@ -695,14 +713,14 @@ fun world_loop(tab, s) {
             inject_all(tab, n, ids)
             ex = if (alive) { expert(s0) } else { {0, 0, 0, 0} }
             tick_all(tab, 0, n)
-            tick_motors(tab, 0, ex)
+            tick_motors(tab, 0, ex, g(s0, 'rew'))
             sleep(11)
             got = drain([], [0, 0, 0, 0])
             fired = elem(got, 0)
             mf = elem(got, 1)
             brain_cmd = {flag(mf, 0), flag(mf, 1), flag(mf, 2), flag(mf, 3)}
             # autopilot: the expert drives while the brain is bad, and hands over as it improves
-            share = if (num(cget(tab, 'auto')) == 1) { fmax(0.0, fmin(0.85, (0.88 - g(s0, 'acc')) / 0.4)) } else { 0.0 }
+            share = if (num(cget(tab, 'mode')) == 1) { 0.0 } else { if (num(cget(tab, 'auto')) == 1) { fmax(0.0, fmin(0.85, (0.88 - g(s0, 'acc')) / 0.4)) } else { 0.0 } }
             use_expert = alive && rndf() < share
             cmd = if (alive) { if (use_expert) { ex } else { brain_cmd } } else { {0, 0, 0, 0} }
             s1 = if (alive) { vitals(pred_step(items_step(move(s0, cmd)))) } else { vitals(pred_step(s0)) }
@@ -717,13 +735,36 @@ fun world_loop(tab, s) {
                 cput(tab, 'win_spikes', 0)
                 cput(tab, 'topw', top_weights(tab, n))
             } else { 'x' }
-            s2 = p(p(s1, 'acc', acc), 'share', share)
+            s2 = reward_step(p(p(s1, 'acc', acc), 'share', share), alive)
             frame(tab, n, tick, fired, mf, ex, rays, s2, if (tick % 40 == 0) { 1 } else { 0 })
             spent = timestamp() - t0
             if (spent < tick_ms) { sleep(tick_ms - spent) } else { 'late' }
             world_loop(tab, s2)
         }
     }
+}
+
+fun count_ev(lst, code, acc) {
+    if (length(lst) == 0) { acc } else { count_ev(tl(lst), code, if (hd(lst) == code) { acc + 1 } else { acc }) }
+}
+
+# reward = what happened (food, poison, bites, bumps) + whether it is now smelling more food /
+# less poison / less danger than a tick ago + a small hunger pressure. No expert involved.
+fun reward_step(s, alive) {
+    x = g(s, 'x')
+    y = g(s, 'y')
+    pr = g(s, 'pred')
+    pdx = x - hd(pr)
+    pdy = y - hd(tl(pr))
+    fc = conc(g(s, 'food'), x, y, 1, 0.0)
+    pc = conc(g(s, 'poison'), x, y, 0, 0.0)
+    dc = if (g(s, 'pred_on') == 1) { Math.exp(0.0 - (pdx * pdx + pdy * pdy) / 0.05) } else { 0.0 }
+    evs = g(s, 'ev')
+    shaping = 6.0 * (fc - g(s, 'fc')) - 6.0 * (pc - g(s, 'pc')) - 4.0 * (dc - g(s, 'dc'))
+    r0 = shaping + 4.0 * to_float(count_ev(evs, 1, 0)) - 3.0 * to_float(count_ev(evs, 2, 0)) - 4.0 * to_float(count_ev(evs, 3, 0))
+    r1 = r0 - (if (g(s, 'bump') > 0) { 0.05 } else { 0.0 }) - 0.003
+    rew = if (alive) { fmax(0.0 - 5.0, fmin(6.0, r1)) } else { 0.0 }
+    p(p(p(p(p(s, 'fc', fc), 'pc', pc), 'dc', dc), 'rew', rew), 'rema', g(s, 'rema') * 0.995 + rew * 0.005)
 }
 
 fun r3(v) { Math.round(v * 1000) }
@@ -765,7 +806,7 @@ fun frame(tab, n, tick, fired, mf, ex, rays, s, with_weights) {
         acc: r3(g(s, 'acc')), share: r3(g(s, 'share')), cause: g(s, 'cause'),
         procs: num(map_get(st, 'processes')), sps: sps, eps: sps * (fan + 4),
         learn: num(cget(tab, 'learn')), lz: num(cget(tab, 'lesioned')), spms: num(cget(tab, 'spawn_ms')),
-        pred_on: g(s, 'pred_on'), auto: num(cget(tab, 'auto')), ev: g(s, 'ev'),
+        pred_on: g(s, 'pred_on'), auto: num(cget(tab, 'auto')), mode: num(cget(tab, 'mode')), rew: Math.round(g(s, 'rema') * 40000), ev: g(s, 'ev'),
         tw: if (with_weights == 1) { list_or_empty(cget(tab, 'topw')) } else { [] }
     }})})
 }
@@ -809,6 +850,9 @@ fun inbox(tab) {
             inbox(tab)
         {'auto'} ->
             cput(tab, 'auto', 1 - num(cget(tab, 'auto')))
+            inbox(tab)
+        {'mode'} ->
+            cput(tab, 'mode', 1 - num(cget(tab, 'mode')))
             inbox(tab)
         {'forget'} ->
             forget(tab, 0, num(cget(tab, 'n')))
@@ -929,7 +973,7 @@ fun render(assigns) {
         "<button data-size=\"1200\">1.2k</button><button data-size=\"2400\">2.4k</button><button data-size=\"3600\">3.6k</button><button data-size=\"4800\">4.8k</button></div>" ++
         "<h3>Experiments</h3><div class=\"row2\"><button class=\"btn on\" id=\"b-learn\">Plasticity: on</button><button class=\"btn\" id=\"b-forget\">Forget</button></div>" ++
         "<div class=\"row2\"><button class=\"btn danger\" data-lesion=\"10\">Lesion 10%</button><button class=\"btn danger\" data-lesion=\"30\">Lesion 30%</button></div>" ++
-        "<div class=\"row2\"><button class=\"btn on\" id=\"b-auto\">Autopilot: on</button><button class=\"btn on\" id=\"b-pred\">Predator: on</button></div></div>" ++
+        "<div class=\"row2\"><button class=\"btn on\" id=\"b-auto\">Autopilot: on</button><button class=\"btn on\" id=\"b-pred\">Predator: on</button></div><div class=\"row2\" style=\"margin-bottom:0\"><button class=\"btn\" id=\"b-mode\">Learning: imitate</button></div></div>" ++
         "<div class=\"card\"><h3>How it works</h3><p class=\"how\">Every neuron is a <b>process</b> that spikes by messaging its neighbours. The creature <b>sees</b> with 7 rays, <b>smells</b> food and poison, feels <b>pain</b>, and senses hunger and health. Only the readout into the four motor neurons learns, and it learns by <b>copying a hand-written expert</b> (imitation, not reinforcement). While the brain is bad the expert <b>autopilots</b>; it hands over as accuracy rises. Switch Autopilot off to watch the brain drive alone.</p></div>" ++
         "</div></div></div>",
         [])
@@ -944,11 +988,13 @@ fun handle_event(name, value, assigns) {
         inbox_send({'forget'})
     } else { if (name == "pred") {
         inbox_send({'pred'})
+    } else { if (name == "mode") {
+        inbox_send({'mode'})
     } else { if (name == "auto") {
         inbox_send({'auto'})
     } else { if (name == "lesion") {
         inbox_send({'lesion', to_int(map_get(value, 'p'))})
-    } else { 'noop' }}}}}}
+    } else { 'noop' }}}}}}}
     assigns
 }
 
@@ -963,6 +1009,7 @@ fun main() {
     cput(tab, 'learn', 1)
     cput(tab, 'pred_on', 1)
     cput(tab, 'auto', 1)
+    cput(tab, 'mode', 0)
     start_sups(tab, 0)
     world = spawn(world_loop(tab, new_world()))
     register('creature_world', world)
