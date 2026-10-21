@@ -38,6 +38,7 @@ let nmax = 24
 let n_out = 5
 let n_sens = 18
 let n_loci = 19
+let cmax = 48
 let tick_ms = 30
 let k_act = 100000
 let k_w = 200000
@@ -165,7 +166,7 @@ fun add_conn(h) {
     ns = g(h, 'n')
     src = if (rndf() < 0.6) { 1000 + rndi(n_sens) } else { hd(nth(ns, rndi(length(ns)))) }
     dst = hd(nth(ns, rndi(length(ns))))
-    if (find_c(g(h, 'c'), src, dst) != nil) { h } else { p(h, 'c', [[src, dst, gauss()] | g(h, 'c')]) }
+    if (length(g(h, 'c')) >= cmax || find_c(g(h, 'c'), src, dst) != nil) { h } else { p(h, 'c', [[src, dst, gauss()] | g(h, 'c')]) }
 }
 
 fun del_conn(h) {
@@ -248,7 +249,8 @@ fun gamete(a, b, rate) {
     ns = app(gam_neurons(g(a, 'n'), g(b, 'n')), only_in(g(b, 'n'), g(a, 'n'), false))
     cs = app(gam_conns(g(a, 'c'), g(b, 'c')), only_in(g(b, 'c'), g(a, 'c'), true))
     ns2 = if (length(ns) > nmax) { Std.take(ns, nmax) } else { ns }
-    mutate_hap(%{b: gam_body(g(a, 'b'), g(b, 'b'), rndi(2)), n: ns2, c: cs}, rate)
+    cs2 = if (length(cs) > cmax) { Std.take(cs, cmax) } else { cs }
+    mutate_hap(%{b: gam_body(g(a, 'b'), g(b, 'b'), rndi(2)), n: ns2, c: cs2}, rate)
 }
 
 # ---- expression: genotype -> phenotype ----
@@ -304,12 +306,13 @@ fun hidden_of(ns) { if (length(ns) == 0) { [] } else { if (hd(hd(ns)) >= n_out) 
 fun idx_of(ns, id, k) { if (length(ns) == 0) { -1 } else { if (hd(hd(ns)) == id) { k } else { idx_of(tl(ns), id, k + 1) } } }
 
 # keep only synapses whose ends exist in this body
-fun live_conns(cs, ns) {
-    if (length(cs) == 0) { [] }
+fun live_conns(cs, ns) { rev(live_acc(cs, ns, []), []) }
+fun live_acc(cs, ns, acc) {
+    if (length(cs) == 0) { acc }
     else {
         c = hd(cs)
         ok = idx_of(ns, nth(c, 1), 0) >= 0 && (is_sens(hd(c)) || idx_of(ns, hd(c), 0) >= 0)
-        if (ok) { [c | live_conns(tl(cs), ns)] } else { live_conns(tl(cs), ns) }
+        live_acc(tl(cs), ns, if (ok) { [c | acc] } else { acc })
     }
 }
 
@@ -406,27 +409,24 @@ fun send_outs(outp, li, a) {
 }
 
 # ---- building a brain from a phenotype: spawn one process per neuron, then wire them ----
-fun in_list(cs, ns, id) {
-    if (length(cs) == 0) { [] }
+fun in_list(cs, ns, id) { rev(in_acc(cs, ns, id, []), []) }
+fun in_acc(cs, ns, id, acc) {
+    if (length(cs) == 0) { acc }
     else {
         c = hd(cs)
-        rest = in_list(tl(cs), ns, id)
         if (nth(c, 1) == id) {
             s = hd(c)
             key = if (is_sens(s)) { s } else { idx_of(ns, s, 0) }
             kind = if (is_sens(s) == false && nth(find_n(ns, s), 1) == 1) { 1 } else { 0 }
-            [[key, kind, nth(c, 2)] | rest]
-        } else { rest }
+            in_acc(tl(cs), ns, id, [[key, kind, nth(c, 2)] | acc])
+        } else { in_acc(tl(cs), ns, id, acc) }
     }
 }
 
-fun out_list(cs, ns, id) {
-    if (length(cs) == 0) { [] }
-    else {
-        c = hd(cs)
-        rest = out_list(tl(cs), ns, id)
-        if (hd(c) == id) { [idx_of(ns, nth(c, 1), 0) | rest] } else { rest }
-    }
+fun out_list(cs, ns, id) { rev(out_acc(cs, ns, id, []), []) }
+fun out_acc(cs, ns, id, acc) {
+    if (length(cs) == 0) { acc }
+    else { c = hd(cs)  out_acc(tl(cs), ns, id, if (hd(c) == id) { [idx_of(ns, nth(c, 1), 0) | acc] } else { acc }) }
 }
 
 fun spawn_neurons(tab, world, slot, ns, cs, all, pl, li) {
@@ -1050,7 +1050,8 @@ fun fl(lst) { if (length(lst) == 0) { [] } else { [to_float(hd(lst)) | fl(tl(lst
 fun fix_body(lst) { if (length(lst) == 0) { [] } else { [[to_float(hd(hd(lst))), to_float(nth(hd(lst), 1))] | fix_body(tl(lst))] } }
 fun fix_ns(lst) { if (length(lst) == 0) { [] } else { n = hd(lst)  [[to_int(hd(n)), to_int(nth(n, 1)), to_float(nth(n, 2)), to_float(nth(n, 3))] | fix_ns(tl(lst))] } }
 fun fix_cs(lst) { if (length(lst) == 0) { [] } else { c = hd(lst)  [[to_int(hd(c)), to_int(nth(c, 1)), to_float(nth(c, 2))] | fix_cs(tl(lst))] } }
-fun fix_hap(h) { %{b: fix_body(g(h, 'b')), n: fix_ns(g(h, 'n')), c: fix_cs(g(h, 'c'))} }
+fun cap(l, k) { if (length(l) > k) { Std.take(l, k) } else { l } }
+fun fix_hap(h) { %{b: fix_body(g(h, 'b')), n: cap(fix_ns(g(h, 'n')), nmax), c: cap(fix_cs(g(h, 'c')), cmax)} }
 fun fix_sps(lst) { if (length(lst) == 0) { [] } else { r = hd(lst)  [[to_int(hd(r)), fl(nth(r, 1)), to_int(nth(r, 2)), to_int(nth(r, 3))] | fix_sps(tl(lst))] } }
 fun fix_hof(lst) {
     if (length(lst) == 0) { [] }
@@ -1115,6 +1116,7 @@ fun world_loop(tab, s) {
 
 fun step(tab, s) {
     t0 = timestamp()
+    cput(tab, 'hb', t0)
     sp = if (num(cget(tab, 'speed')) < 1) { 1 } else { num(cget(tab, 'speed')) }
     plast = num(cget(tab, 'plast'))
     s0 = p(s, 'pred_on', num(cget(tab, 'pred_on')))
@@ -1347,14 +1349,29 @@ fun render(assigns) {
         [])
 }
 
+# if the world process ever dies (a panic), start a new one: it resumes from the last checkpoint
+fun watchdog(tab) {
+    cput(tab, 'hb', timestamp())
+    w = spawn(world_loop(tab, new_world()))
+    watch(tab, w)
+}
+
+fun watch(tab, w) {
+    sleep(2000)
+    if (timestamp() - num(cget(tab, 'hb')) > 15000) {
+        eprint("[evolve3] world stopped responding; restarting from the last checkpoint")
+        cput(tab, 'restarts', num(cget(tab, 'restarts')) + 1)
+        watchdog(tab)
+    } else { watch(tab, w) }
+}
+
 fun main() {
     tab = make_tables(ets_new(), 16)
     cput(tab, 'pred_on', 1)
     cput(tab, 'plast', 1)
     cput(tab, 'speed', 1)
     cput(tab, 'sel', 0 - 1)
-    world = spawn(world_loop(tab, new_world()))
-    register('evolve3_world', world)
+    spawn(watchdog(tab))
     register('evolve3_in', spawn(inbox(tab)))
     LiveView.start(4016, [
         {"/", %{
