@@ -493,26 +493,57 @@ fun founder_genome() {
 #   1 Toxic Marsh     six big vents, a few rocks, four meadows squeezed between the vents
 #   2 Lean Waters     a maze of twelve boulders, one vent, three small meadows far apart
 #   3 Rich Shallows   open water, one tiny vent, eight meadows close together
-fun obstacles(i) { obst_c(i % 4) }
+# eight environments; island i lives in environment i % 8
+#   0 Green Meadows  1 Toxic Marsh  2 Lean Waters  3 Rich Shallows      (the evolved four)
+#   4 Coral Reef     5 Kelp Forest  6 Arctic Ice   7 Black Smoker       (new, fresh evolution)
+fun env(i) { i % 8 }
+fun obstacles(i) { obst_c(env(i)) }
 fun obst_c(i) {
     if (i == 0) { [[1.20, 1.18, 0.07], [1.33, 1.28, 0.06], [1.17, 1.36, 0.05], [1.40, 1.12, 0.045], [1.29, 1.44, 0.045], [0.40, 0.45, 0.06], [1.10, 0.38, 0.05], [0.30, 1.30, 0.05]] }
     else { if (i == 1) { [[0.80, 0.22, 0.05], [1.45, 0.80, 0.05], [0.15, 0.80, 0.05]] }
     else { if (i == 2) { [[0.30, 0.30, 0.08], [0.80, 0.22, 0.07], [1.30, 0.30, 0.08], [0.22, 0.80, 0.07], [1.38, 0.80, 0.07], [0.30, 1.30, 0.08],
                          [0.80, 1.38, 0.07], [1.30, 1.30, 0.08], [0.55, 0.55, 0.06], [1.05, 0.55, 0.06], [0.55, 1.05, 0.06], [1.05, 1.05, 0.06]] }
-    else { [[0.25, 1.35, 0.05], [1.35, 0.25, 0.05]] } } }
+    else { if (i == 3) { [[0.25, 1.35, 0.05], [1.35, 0.25, 0.05]] }
+    else { if (i == 4) { [[0.450, 0.450, 0.055], [0.525, 0.450, 0.032], [0.473, 0.521, 0.032], [0.389, 0.494, 0.032], [0.389, 0.406, 0.032], [0.473, 0.379, 0.032], [1.150, 0.420, 0.055], [1.207, 0.468, 0.032], [1.122, 0.489, 0.032], [1.075, 0.415, 0.032], [1.132, 0.347, 0.032], [1.214, 0.380, 0.032], [0.800, 0.880, 0.055], [0.813, 0.954, 0.032], [0.734, 0.915, 0.032], [0.746, 0.828, 0.032], [0.833, 0.813, 0.032], [0.874, 0.891, 0.032], [0.400, 1.220, 0.055], [0.362, 1.285, 0.032], [0.327, 1.204, 0.032], [0.393, 1.145, 0.032], [0.469, 1.190, 0.032], [0.450, 1.276, 0.032], [1.220, 1.200, 0.055], [1.149, 1.225, 0.032], [1.174, 1.141, 0.032], [1.262, 1.138, 0.032], [1.292, 1.221, 0.032], [1.222, 1.275, 0.032]] }
+    else { if (i == 5) { [[0.25, 0.30, 0.05], [1.35, 1.40, 0.06], [1.45, 0.25, 0.04]] }
+    else { if (i == 6) { [[0.400, 0.400, 0.120], [1.150, 0.350, 0.100], [0.750, 0.900, 0.140], [0.300, 1.250, 0.090], [1.250, 1.200, 0.110], [0.950, 1.450, 0.060], [0.400, 0.530, 0.070], [1.250, 0.400, 0.060]] }
+    else { [[0.55, 1.30, 0.06], [1.30, 0.45, 0.05], [1.40, 1.45, 0.05], [0.20, 0.90, 0.045]] } } } } } } }
 }
 
 # toxic vents: standing in one burns health
-fun vents(i) { vents_c(i % 4) }
+fun vents(i) { vents_c(env(i)) }
 fun vents_c(i) {
     if (i == 0) { [[0.80, 0.80, 0.12], [1.36, 0.26, 0.10], [0.20, 0.62, 0.09]] }
     else { if (i == 1) { [[0.40, 0.40, 0.13], [1.20, 0.38, 0.12], [0.80, 0.80, 0.14], [0.38, 1.20, 0.12], [1.22, 1.22, 0.13], [0.80, 1.47, 0.08]] }
     else { if (i == 2) { [[0.80, 0.80, 0.07]] }
-    else { [[1.42, 1.42, 0.05]] } } }
+    else { if (i == 3) { [[1.42, 1.42, 0.05]] }
+    else { if (i == 4) { [[1.42, 0.80, 0.07]] }
+    else { if (i == 5) { [[1.45, 0.75, 0.06]] }
+    else { if (i == 6) { [[1.45, 0.80, 0.05]] }
+    else { [[0.800, 0.800, 0.100], [0.350, 0.350, 0.060], [1.250, 1.200, 0.070]] } } } } } } }
 }
 
-fun meadow_count(i) { nth([6, 4, 3, 8], i % 4) }
-fun meadow_ring(i) { nth([0.31, 0.27, 0.38, 0.24], i % 4) }
+# kelp beds: inside one you are hidden from others (unless very close) but you swim slower
+fun kelp(i) { if (env(i) == 5) { [[0.500, 0.500, 0.170], [1.100, 0.500, 0.150], [0.800, 1.050, 0.180], [0.350, 1.250, 0.120], [1.300, 1.100, 0.130]] } else { [] } }
+fun in_zone(x, y, lst) {
+    if (length(lst) == 0) { false }
+    else { z = hd(lst)  dx = x - hd(z)  dy = y - nth(z, 1)  if (dx * dx + dy * dy < nth(z, 2) * nth(z, 2)) { true } else { in_zone(x, y, tl(lst)) } }
+}
+# near coral: within 0.03 of a coral head's edge
+fun near_coral(x, y, lst) {
+    if (length(lst) == 0) { false }
+    else { z = hd(lst)  dx = x - hd(z)  dy = y - nth(z, 1)  r = nth(z, 2) + 0.03  if (dx * dx + dy * dy < r * r) { true } else { near_coral(x, y, tl(lst)) } }
+}
+# food grows around fixed centres in the new environments
+fun food_centres(e) {
+    if (e == 4) { [[0.450, 0.450, 0.000], [1.150, 0.420, 0.000], [0.800, 0.880, 0.000], [0.400, 1.220, 0.000], [1.220, 1.200, 0.000]] }
+    else { if (e == 5) { [[0.500, 0.500, 0.170], [1.100, 0.500, 0.150], [0.800, 1.050, 0.180], [0.350, 1.250, 0.120], [1.300, 1.100, 0.130]] }
+    else { if (e == 6) { [[0.400, 0.400, 0.120], [1.150, 0.350, 0.100], [0.750, 0.900, 0.140], [0.300, 1.250, 0.090], [1.250, 1.200, 0.110], [0.950, 1.450, 0.060]] }
+    else { [] } } }
+}
+
+fun meadow_count(i) { nth([6, 4, 3, 8, 5, 5, 6, 3], env(i)) }
+fun meadow_ring(i) { nth([0.31, 0.27, 0.38, 0.24, 0.3, 0.3, 0.3, 0.3], env(i)) }
 
 fun toxicity(x, y, lst) {
     if (length(lst) == 0) { 0.0 }
@@ -539,17 +570,32 @@ fun in_obstacle(x, y, obs) {
 fun clampw(v) { clampf(v, 0.02, WS - 0.02) }
 
 fun patch_center(i, k, t) {
+    fc = food_centres(env(i))
+    if (length(fc) > 0) { c = nth(fc, k % length(fc))  {hd(c), nth(c, 1)} } else { ring_center(i, k, t) }
+}
+fun ring_center(i, k, t) {
     a = to_float(k) * 6.2832 / to_float(meadow_count(i)) + to_float(t) * 0.00002
     {0.5 * WS + meadow_ring(i) * WS * Math.cos(a), 0.5 * WS + meadow_ring(i) * WS * Math.sin(a)}
 }
 
 # half the algae grows anywhere, half in wide drifting patches: spinning on the spot does not pay
-fun plant_pos(i, t, tries) {
+fun plant_pos(i, t, tries) { if (env(i) == 7) { smoker_food(i, tries) } else { plant_pos2(i, t, tries) } }
+# around a black smoker: a ring of bacterial mats just outside the deadly mouth
+fun smoker_food(i, tries) {
+    v = nth(vents(i), rndi(length(vents(i))))
+    a = rndf() * 6.2832
+    d = nth(v, 2) + 0.025 + rndf() * 0.13
+    x = clampw(hd(v) + Math.cos(a) * d)
+    y = clampw(nth(v, 1) + Math.sin(a) * d)
+    if (tries <= 0 || (in_obstacle(x, y, obstacles(i)) == false && toxicity(x, y, vents(i)) == 0.0)) { [x, y, 0] } else { smoker_food(i, tries - 1) }
+}
+fun plant_pos2(i, t, tries) {
     c = patch_center(i, rndi(meadow_count(i)), t)
-    anywhere = rndf() < 0.35
+    anywhere = rndf() < (if (env(i) >= 4) { 0.15 } else { 0.35 })
     x = if (anywhere) { 0.04 + rndf() * (WS - 0.08) } else { clampw(elem(c, 0) + gauss() * 0.15) }
     y = if (anywhere) { 0.04 + rndf() * (WS - 0.08) } else { clampw(elem(c, 1) + gauss() * 0.15) }
-    if (tries <= 0 || in_obstacle(x, y, obstacles(i)) == false) { [x, y, 0] } else { plant_pos(i, t, tries - 1) }
+    # no food grows inside a vent: food there would reward swimming into the danger the vent punishes
+    if (tries <= 0 || (in_obstacle(x, y, obstacles(i)) == false && toxicity(x, y, vents(i)) == 0.0)) { [x, y, 0] } else { plant_pos2(i, t, tries - 1) }
 }
 
 fun init_plants(i, k, t) { ip_acc(i, k, t, []) }
@@ -573,10 +619,9 @@ fun ipo_acc(i, k, acc) { if (k <= 0) { acc } else { ipo_acc(i, k - 1, [poison_po
 fun slots(k, hi) { if (k >= hi) { [] } else { [k | slots(k + 1, hi)] } }
 
 # four islands, four climates: same rocks and vents, different food, poison and vent strength
-# islands repeat the four climates: island i has climate i % 4
-fun isl_plants(i) { nth([150, 150, 95, 210], i % 4) }
-fun isl_poison(i) { nth([30, 75, 20, 30], i % 4) }
-fun isl_vk(i) { nth([1.0, 2.2, 1.0, 1.0], i % 4) }
+fun isl_plants(i) { nth([150, 150, 95, 210, 160, 150, 115, 150], env(i)) }
+fun isl_poison(i) { nth([30, 75, 20, 30, 20, 15, 10, 35], env(i)) }
+fun isl_vk(i) { nth([1.0, 2.2, 1.0, 1.0, 1.5, 1.0, 1.0, 3.0], env(i)) }
 fun nisl(tab) { num(cget(tab, 'n_isl')) }
 
 fun new_world(isl) {
@@ -626,7 +671,7 @@ fun nearest_meat(lst, x, y, best) {
 # instead of looking keys up in each creature's map
 fun mk_oth(crs, acc) {
     if (length(crs) == 0) { acc }
-    else { c = hd(crs)  mk_oth(tl(crs), [{g(c, 'x'), g(c, 'y'), g(c, 'id'), g(c, 'sp'), power(c), g(c, 'sig'), g(c, 'bite'), g(c, 'ph')} | acc]) }
+    else { c = hd(crs)  mk_oth(tl(crs), [{g(c, 'x'), g(c, 'y'), g(c, 'id'), g(c, 'sp'), power(c), g(c, 'sig'), g(c, 'bite'), g(c, 'ph'), in_zone(g(c, 'x'), g(c, 'y'), kelp(g(c, 'isl')))} | acc]) }
 }
 
 fun scan_oth(lst, x, y, id, best, sig, cnt) {
@@ -638,8 +683,9 @@ fun scan_oth(lst, x, y, id, best, sig, cnt) {
             dx = elem(o, 0) - x
             dy = elem(o, 1) - y
             d2 = dx * dx + dy * dy
+            hidden = elem(o, 8) && d2 > 0.0036
             near = d2 < 0.0225
-            nb = if (best == nil || d2 < elem(best, 0)) { {d2, dx, dy, o} } else { best }
+            nb = if (hidden == false && (best == nil || d2 < elem(best, 0))) { {d2, dx, dy, o} } else { best }
             scan_oth(tl(lst), x, y, id, nb, if (near) { sig + elem(o, 5) } else { sig }, if (near) { cnt + 1 } else { cnt })
         }
     }
@@ -654,7 +700,8 @@ fun hunter_oth(lst, x, y, id, sp, mine, best) {
             dx = elem(o, 0) - x
             dy = elem(o, 1) - y
             d2 = dx * dx + dy * dy
-            hunter_oth(tl(lst), x, y, id, sp, mine, if (best == nil || d2 < elem(best, 0)) { {d2, dx, dy, o} } else { best })
+            seen = elem(o, 8) == false || d2 < 0.0036
+            hunter_oth(tl(lst), x, y, id, sp, mine, if (seen && (best == nil || d2 < elem(best, 0))) { {d2, dx, dy, o} } else { best })
         } else { hunter_oth(tl(lst), x, y, id, sp, mine, best) }
     }
 }
@@ -731,7 +778,7 @@ fun senses(s, c) {
     hx = g(c, 'hx')
     hy = g(c, 'hy')
     ph = g(c, 'ph')
-    sight = nth(ph, 4)
+    sight = nth(ph, 4) * (if (env(g(c, 'isl')) == 7) { 0.6 } else { 1.0 })
     pl = see(nearest_item(g(s, 'plants'), x, y, nil), sight, hx, hy)
     mt = see(nearest_meat(g(s, 'meat'), x, y, nil), sight, hx, hy)
     oth = g(s, 'oth')
@@ -822,7 +869,8 @@ fun act_one(tab, c) {
     om = 0.8 * numf(g(c, 'om')) + 0.2 * 0.16 * hd(o)
     hh = rotate_h(g(c, 'hx'), g(c, 'hy'), om)
     thrust = fmax(0.0, nth(o, 1))
-    sp = 0.85 * numf(g(c, 'v')) + 0.15 * 0.011 * nth(ph, 1) * thrust / (1.0 + 0.3 * nth(ph, 2))
+    slow = if (in_zone(g(c, 'x'), g(c, 'y'), kelp(g(c, 'isl')))) { 0.55 } else { 1.0 }
+    sp = 0.85 * numf(g(c, 'v')) + 0.15 * 0.011 * nth(ph, 1) * thrust * slow / (1.0 + 0.3 * nth(ph, 2))
     po = push_out(clampw(g(c, 'x') + elem(hh, 0) * sp), clampw(g(c, 'y') + elem(hh, 1) * sp), obstacles(g(c, 'isl')))
     cost = 0.02 * thrust * thrust * nth(ph, 1) * nth(ph, 0) + 0.012 * fabs(hd(o)) * nth(ph, 0)
     c1 = p(p(p(p(p(p(c, 'x', elem(po, 0)), 'y', elem(po, 1)), 'hx', elem(hh, 0)), 'hy', elem(hh, 1)), 'om', om), 'v', sp)
@@ -949,7 +997,8 @@ fun fight(crs, snap) {
             if (tid == nil) { fight(upd(crs, g(a, 'id'), fun(c) { p(p(c, 'acd', 6), 'e', g(c, 'e') - 0.15) }), tl(snap)) }
             else {
                 t = find_id(crs, tid)
-                dmg = 6.0 * nth(aph, 3) * nth(aph, 0) / (1.0 + nth(g(t, 'ph'), 2))
+                shelter = if (env(g(t, 'isl')) == 4 && near_coral(g(t, 'x'), g(t, 'y'), obstacles(g(t, 'isl')))) { 0.5 } else { 1.0 }
+                dmg = shelter * 6.0 * nth(aph, 3) * nth(aph, 0) / (1.0 + nth(g(t, 'ph'), 2))
                 gain = dmg * 0.6 * (0.25 + 0.75 * nth(aph, 5))
                 aid = g(a, 'id')
                 crs2 = upd(crs, tid, fun(c) { p(p(p(c, 'h', g(c, 'h') - dmg), 'pain', 10), 'killer', aid) })
@@ -1011,7 +1060,8 @@ fun preds_step(s, lst, acc) {
 fun vitals(c) {
     ph = g(c, 'ph')
     sz = nth(ph, 0)
-    cost = 0.012 + 0.018 * sz * sz + 0.0016 * to_float(g(c, 'nn')) + 0.0004 * to_float(g(c, 'nc')) +
+    cold = if (env(numf(g(c, 'isl'))) == 6) { 0.035 / sz } else { 0.0 }
+    cost = cold + 0.012 + 0.018 * sz * sz + 0.0016 * to_float(g(c, 'nn')) + 0.0004 * to_float(g(c, 'nc')) +
            0.006 * nth(ph, 2) + 0.005 * nth(ph, 3) + 0.02 * nth(ph, 4) + 0.03 * nth(ph, 11)
     tox = toxicity(g(c, 'x'), g(c, 'y'), vents(g(c, 'isl')))
     regen = g(c, 'e') > 40.0 && g(c, 'h') < 100.0 && tox == 0.0
@@ -1361,9 +1411,10 @@ fun world_loop(tab, s) {
     if (g(s, 'init') == 0) {
         cput(tab, k_isl + 300 + isl, self())
         own = ck_dir ++ "/" ++ ck_name(isl)
-        seed = ck_dir ++ "/" ++ ck_name(isl % 4)
+        e = env(isl)
+        seed = ck_dir ++ "/" ++ ck_name(e)
         s1 = if (file_exists(own) == 'true') { load(tab, self(), s, ck_name(isl)) }
-             else { if (file_exists(seed) == 'true') { load(tab, self(), s, ck_name(isl % 4)) } else { load(tab, self(), s, "latest.json") } }
+             else { if (e >= 4) { s } else { if (file_exists(seed) == 'true') { load(tab, self(), s, ck_name(e)) } else { load(tab, self(), s, "latest.json") } } }
         s2 = if (length(g(s1, 'crs')) == 0) { founders(tab, self(), p(s1, 'init', 1), 50) } else { s1 }
         drain_acks()
         world_loop(tab, p(s2, 'init', 1))
@@ -1398,16 +1449,18 @@ fun emigrate(tab, s, tick) {
     isl = g(s, 'isl')
     crs = g(s, 'crs')
     # while the Toxic Marsh is nearly empty, the other islands send it colonists four times as often
-    target = isl - isl % 4 + 1
+    grp = isl / 4
+    target = grp * 4 + 1
     marsh = cget(tab, k_isl + 400 + target)
-    marsh_low = isl % 4 != 1 && target < nisl(tab) && marsh != nil && nth(marsh, 1) < 10
+    marsh_low = env(target) == 1 && isl != target && target < nisl(tab) && marsh != nil && nth(marsh, 1) < 10
     normal = tick % 700 == (isl * 175) % 700 && rndf() < 0.7
     rescue = marsh_low && tick % 175 == (isl * 43) % 175
-    due = (normal || rescue) && length(crs) > 20
+    due = (normal || rescue) && length(crs) > 20 && nisl(tab) > grp * 4 + 1
     if (due == false) { s }
     else {
         c = nth(crs, rndi(length(crs)))
-        dest = if (rescue) { target } else { (isl + 1 + rndi(nisl(tab) - 1)) % nisl(tab) }
+        gsize = if (grp * 4 + 4 <= nisl(tab)) { 4 } else { nisl(tab) - grp * 4 }
+        dest = if (rescue) { target } else { grp * 4 + (isl % 4 + 1 + rndi(gsize - 1)) % gsize }
         pid = cget(tab, k_isl + 300 + dest)
         if (pid == nil || g(c, 'age') < 300) { s }
         else {
@@ -1448,13 +1501,14 @@ fun step(tab, s0x) {
     s4 = emigrate(tab, s4a, tick)
     # the Toxic Marsh (island 1) gets no random immigrants: only real migrants from the other islands,
     # so whatever lives there has to adapt to the vents itself
-    s5 = if (length(g(s4, 'crs')) < 20 && tick % 30 == 0 && g(s4, 'isl') % 4 != 1) { immigrate(tab, self(), s4) } else { s4 }
+    s5 = if (length(g(s4, 'crs')) < 20 && tick % 30 == 0 && env(g(s4, 'isl')) != 1) { immigrate(tab, self(), s4) } else { s4 }
     s6a = if (tick % 40 == 0) { species_step(s5) } else { s5 }
     s6 = if (tick % 500 == 0) { p(p(s6a, 'hist', cap([app(hist_sample(s6a, tick), flee_sample(tab, s6a)) | g(s6a, 'hist')], 400)), 'eaten_mark', g(s6a, 'd_eaten')) } else { s6a }
     s7 = if (tick - g(s6, 'ck_tick') >= 4000) { save(s6, ck_name(isl)) } else { s6 }
     if (tick % 20 == 0) { cput(tab, k_isl + 400 + isl, [isl, length(g(s7, 'crs')), nsp_alive(s7), g(s7, 'maxgen'), tick, g(s7, 'mig_in'), g(s7, 'mig_out'), forage_of(g(s7, 'crs'))]) } else { 'x' }
     every = 1
-    viewed = num(cget(tab, 'view')) == isl
+    # every viewer sends a heartbeat for the island it watches; an island streams full frames while anyone watches it
+    viewed = timestamp() - num(cget(tab, k_isl + 600 + isl)) < 6000
     emit = viewed && tick % every == 0
     if (emit) { frame(tab, s7, tick, left, sp) } else { 'skip' }
     if (viewed == false && tick % (every * 4) == 0) { mini(s7) } else { 'x' }
@@ -1491,7 +1545,7 @@ fun pred_pts(lst) { if (length(lst) == 0) { [] } else { pr = hd(lst)  [[r3(hd(pr
 fun pois_pts(lst) { rev(po_acc(lst, []), []) }
 fun po_acc(lst, acc) { if (length(lst) == 0) { acc } else { it = hd(lst)  po_acc(tl(lst), [[r3(hd(it) / WS), r3(nth(it, 1) / WS)] | acc]) } }
 fun meadows(i, k, t) { if (k >= meadow_count(i)) { [] } else { c = patch_center(i, k, t)  [[r3(elem(c, 0) / WS), r3(elem(c, 1) / WS), r3(0.17 / WS)] | meadows(i, k + 1, t)] } }
-fun maps(k) { if (k >= 4) { [] } else { [[obst_pts(obstacles(k)), obst_pts(vents(k))] | maps(k + 1)] } }
+fun maps(k) { if (k >= 8) { [] } else { [[obst_pts(obstacles(k)), obst_pts(vents(k)), obst_pts(kelp(k))] | maps(k + 1)] } }
 
 fun obst_pts(lst) { if (length(lst) == 0) { [] } else { o = hd(lst)  [[r3(hd(o) / WS), r3(nth(o, 1) / WS), r3(nth(o, 2) / WS)] | obst_pts(tl(lst))] } }
 
@@ -1582,7 +1636,7 @@ fun frame(tab, s, tick, left, sp) {
                                         mom: g(sc, 'mom'), dad: g(sc, 'dad')} } else { nil },
         plants: plant_pts(g(s, 'plants')), meat: meat_pts(g(s, 'meat')), preds: [],
         obst: if (tick % 30 == 0 || full) { obst_pts(obstacles(g(s, 'isl'))) } else { nil }, vents: if (tick % 30 == 0 || full) { obst_pts(vents(g(s, 'isl'))) } else { nil },
-        meadows: if (tick % 30 == 0 || full) { meadows(g(s, 'isl'), 0, tick) } else { nil }, maps: if (tick % 60 == 0) { maps(0) } else { nil }, poison: pois_pts(g(s, 'poison')), ws: WS,
+        meadows: if (tick % 30 == 0 || full) { meadows(g(s, 'isl'), 0, tick) } else { nil }, env: env(g(s, 'isl')), kelp: if (tick % 30 == 0 || full) { obst_pts(kelp(g(s, 'isl'))) } else { nil }, maps: if (tick % 60 == 0) { maps(0) } else { nil }, poison: pois_pts(g(s, 'poison')), ws: WS,
         pop: length(crs), maxgen: g(s, 'maxgen'), b_sex: g(s, 'b_sex'), b_bud: g(s, 'b_bud'), b_imm: g(s, 'b_imm'),
         d_starve: g(s, 'd_starve'), d_pred: g(s, 'd_pred'), d_eaten: g(s, 'd_eaten'), d_old: g(s, 'd_old'), d_toxic: num(g(s, 'd_toxic')),
         sps: sp_rows(g(s, 'sps'), crs),
@@ -1634,7 +1688,7 @@ fun handle_event(name, value, assigns) {
     else { if (name == "save") { inbox_send({'cmd', 'save'}) }
     else { if (name == "load") { inbox_send({'cmd', 'load'}) }
     else { if (name == "reset") { inbox_send({'cmd', 'reset'}) }
-    else { if (name == "view") { inbox_send({'set', 'view', to_int(map_get(value, 'i'))})  inbox_send({'set', 'sel_dirty', 1}) }
+    else { if (name == "view") { inbox_send({'set', k_isl + 600 + to_int(map_get(value, 'i')), timestamp()})  if (map_get(value, 'fresh') != nil) { inbox_send({'set', 'sel_dirty', 1}) } else { 'x' } }
     else { 'noop' } } } } } } } }
     assigns
 }
@@ -1703,7 +1757,7 @@ fun render(assigns) {
         "<div class=\"card world\" id=\"arena\"><canvas id=\"arena-cv\" sw-keep></canvas>" ++
         "<div class=\"hud\"><div class=\"head\" id=\"head\" sw-keep><span class=\"big\">Generation &ndash;</span>waiting for the world</div>" ++
         "<div class=\"seg\"><button data-speed=\"1\">1x</button><button data-speed=\"2\">fast</button><button data-speed=\"3\">turbo</button></div></div>" ++
-        "<div class=\"legend\"><span><i style=\"background:#50e3c2\"></i>algae (food)</span><span><i style=\"background:#c4423f\"></i>meat (the dead)</span><span><i style=\"background:#b45cf0\"></i>poison algae &amp; toxic vents (hurt)</span><span><i style=\"background:#287850\"></i>algae meadow</span><span><i style=\"background:#ff4b3a\"></i>red spikes = meat-eating hunter</span>" ++
+        "<div class=\"legend\" id=\"legend\" sw-keep><span><i style=\"background:#50e3c2\"></i>algae (food)</span><span><i style=\"background:#c4423f\"></i>meat (the dead)</span><span><i style=\"background:#b45cf0\"></i>poison algae &amp; toxic vents (hurt)</span><span><i style=\"background:#287850\"></i>algae meadow</span><span><i style=\"background:#ff4b3a\"></i>red spikes = meat-eating hunter</span>" ++
         "<span style=\"color:#6b6b6b\">microbe: spikes = attack &middot; grey plates = armor &middot; tail = speed &middot; eye = sight &middot; glow = signalling</span></div>" ++
         "<div class=\"tip\" id=\"tip\" sw-keep></div><div class=\"toast\" id=\"toast\" sw-keep></div></div>" ++
         "<div class=\"side\">" ++

@@ -26,8 +26,24 @@
   var tpsT = 0, tpsTick = 0, tps = 0, lastFrameT = 0, gap = 33, uiT = 0, toastT = 0, feedT = {};
   var sprites = {}, spriteN = 0, AW = 0, AH = 0, view = { s: 1, ox: 0, oy: 0, k: 1 };
   var pos = {}, predPos = [], hover = null, mouse = null, inspId = 0, view_i = 0, minis = {}, isls = [], sptree = [], ped = null, islT = 0;
-  var PAL = [[6, 10, 16], [12, 14, 9], [17, 17, 19], [4, 13, 20]], MEAD = ['rgba(40,120,80,0.55)', 'rgba(90,110,40,0.55)', 'rgba(70,100,85,0.40)', 'rgba(30,150,125,0.60)'], maps = null;
-  var ISL = [{ n: 'Green Meadows', d: 'plenty of algae' }, { n: 'Toxic Marsh', d: 'strong vents, lots of poison' }, { n: 'Lean Waters', d: 'scarce food' }, { n: 'Rich Shallows', d: 'abundant food' }];
+  var PAL = [[6, 10, 16], [12, 14, 9], [17, 17, 19], [4, 13, 20], [10, 46, 56], [6, 22, 21], [7, 16, 30], [8, 5, 6]];
+  var MEAD = ['rgba(40,120,80,0.55)', 'rgba(90,110,40,0.55)', 'rgba(70,100,85,0.40)', 'rgba(30,150,125,0.60)'], maps = null, ENV = -1, kelpZ = [], caust = null;
+  var ISL = [{ n: 'Green Meadows', d: 'plenty of algae' }, { n: 'Toxic Marsh', d: 'strong vents, lots of poison' }, { n: 'Lean Waters', d: 'scarce food' }, { n: 'Rich Shallows', d: 'abundant food' },
+    { n: 'Coral Reef', d: 'new: coral shelters you from bites' }, { n: 'Kelp Forest', d: 'new: hide in kelp, swim slowly' }, { n: 'Arctic Ice', d: 'new: cold, big bodies stay warm' }, { n: 'Black Smoker', d: 'new: dark, rich food by deadly heat' }];
+  var LEG = [
+    [['#50e3c2', 'algae (food)'], ['#c4423f', 'meat (the dead)'], ['#b45cf0', 'poison algae & toxic vents'], ['#287850', 'algae meadow']],
+    [['#50e3c2', 'algae (food)'], ['#c4423f', 'meat (the dead)'], ['#b45cf0', 'poison algae & toxic vents'], ['#5a6e28', 'marsh meadow']],
+    [['#50e3c2', 'algae (food)'], ['#c4423f', 'meat (the dead)'], ['#b45cf0', 'poison & toxic vent'], ['#8a8f99', 'boulders']],
+    [['#50e3c2', 'algae (food)'], ['#c4423f', 'meat (the dead)'], ['#b45cf0', 'poison & toxic vent'], ['#1e9682', 'meadows']],
+    [['#bff4ff', 'plankton (food)'], ['#ff6fa8', 'coral: bites near it do half damage'], ['#ff9ad0', 'jellyfish (hurt)'], ['#c4423f', 'meat']],
+    [['#8fd14f', 'kelp snails (food)'], ['#3f8f3a', 'kelp: hidden but slow inside'], ['#7a3fa0', 'urchins (hurt)'], ['#c4423f', 'meat']],
+    [['#ff9a7a', 'krill (food)'], ['#e6f2f8', 'ice floes'], ['#2fb0a0', 'brine & toxic bloom (hurt)'], ['#c4423f', 'meat']],
+    [['#fff2c0', 'tube worms (food)'], ['#ff7a20', 'black smoker: deadly heat'], ['#e8d040', 'sulfur (hurt)'], ['#c4423f', 'meat']]];
+  function setLegend() {
+    var el = $('legend'); if (!el || ENV < 0) return;
+    el.innerHTML = LEG[ENV].map(function (x) { return '<span><i style="background:' + x[0] + '"></i>' + x[1] + '</span>'; }).join('') +
+      '<span style="color:#6b6b6b">microbe: spikes = attack &middot; grey plates = armor &middot; tail = speed &middot; eye = sight &middot; glow = signalling</span>';
+  }
   var SENS = ['bias', 'plant dir', 'plant near', 'meat dir', 'meat near', 'other dir', 'other near', 'kinship', 'its size', 'its signal',
     'hunter dir', 'hunter near', 'hunter biting', 'wall ahead', 'energy', 'health', 'pain', 'heard', 'poison dir', 'poison near', 'toxic here', 'toxic ahead'];
   var OUTS = ['turn', 'thrust', 'bite', 'signal', 'mate'];
@@ -57,13 +73,25 @@
   if (window.ResizeObserver) { var ro = new ResizeObserver(resize); ro.observe($('arena')); ro.observe(bc); ro.observe(gc); } else window.addEventListener('resize', resize);
 
   /* ---------- the slide: water and rocks, drawn once ---------- */
+  function vnoise(x, y, sc) {
+    var gx = Math.floor(x / sc), gy = Math.floor(y / sc), fx = x / sc - gx, fy = y / sc - gy;
+    var a = hash(gx, gy), b = hash(gx + 1, gy), c = hash(gx, gy + 1), d = hash(gx + 1, gy + 1);
+    fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
+    return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
+  }
   function makeBackground(obst) {
     bgc = document.createElement('canvas'); bgc.width = WP; bgc.height = WP;
     var g = bgc.getContext('2d'), img = g.createImageData(WP, WP), d = img.data, x, y, i;
     for (y = 0; y < WP; y++) for (x = 0; x < WP; x++) {
       i = (y * WP + x) * 4;
-      var n = hash(x, y), v = hash(x >> 4, y >> 4), pal = PAL[view_i % 4], b0 = Math.floor(v * 4), spark = n > 0.996 ? 16 : (view_i % 4 === 2 && n > 0.93 ? 5 : 0);
-      d[i] = pal[0] + b0 + spark * 0.6; d[i + 1] = pal[1] + b0 + spark; d[i + 2] = pal[2] + b0 + spark; d[i + 3] = 255;
+      var n = hash(x, y), v = vnoise(x, y, 22), e = ENV < 0 ? view_i % 8 : ENV, pal = PAL[e], b0 = Math.floor(v * 4), spark = n > 0.996 ? 16 : (e === 2 && n > 0.93 ? 5 : 0);
+      var r0 = pal[0] + b0 + spark * 0.6, g0 = pal[1] + b0 + spark, bl0 = pal[2] + b0 + spark;
+      var sn = vnoise(x + 500, y, 26) * 0.7 + vnoise(x, y + 500, 9) * 0.3 + (n - 0.5) * 0.08;
+      if (e === 4 && sn > 0.56) { var sd = 50 + n * 10 + (sn - 0.56) * 60; r0 = sd + 10; g0 = sd + 6; bl0 = sd - 10; }          /* sand */
+      else if (e === 5 && n > 0.985) { r0 = 20; g0 = 34; bl0 = 26; }                                                          /* pebbles */
+      else if (e === 6) { var st = Math.sin(x * 0.05 + y * 0.02) * 2; r0 += st; g0 += st; bl0 += st * 2; }                   /* cold streaks */
+      else if (e === 7 && n > 0.992) { r0 = 70; g0 = 16; bl0 = 10; }                                                          /* embers */
+      d[i] = r0; d[i + 1] = g0; d[i + 2] = bl0; d[i + 3] = 255;
     }
     for (var k = 0; k < (obst || []).length; k++) {
       var o = obst[k], cx = o[0] / 1000 * WP, cy = o[1] / 1000 * WP, r = o[2] / 1000 * WP;
@@ -72,11 +100,94 @@
         var dx = x + 0.5 - cx, dy = y + 0.5 - cy, dd = Math.sqrt(dx * dx + dy * dy);
         if (dd > r) continue;
         i = (y * WP + x) * 4;
-        var light = (-dx - dy) / (r * 1.6), l = dd > r - 1.2 ? 22 : 36 + light * 20 + hash(x * 3, y * 7) * 9;
-        d[i] = l * 0.82; d[i + 1] = l * 0.88; d[i + 2] = l; d[i + 3] = 255;
+        var light = (-dx - dy) / (r * 1.6), e2 = ENV < 0 ? view_i % 8 : ENV, col = obstPix(e2, k, dx, dy, dd, r, light, x, y);
+        if (!col) continue;
+        d[i] = col[0]; d[i + 1] = col[1]; d[i + 2] = col[2]; d[i + 3] = 255;
       }
     }
     g.putImageData(img, 0, 0);
+  }
+
+  /* what an obstacle looks like in each environment: rock, branching coral, ice floe or basalt */
+  var CORAL = [[255, 111, 168], [255, 154, 60], [176, 108, 255], [255, 210, 60], [255, 120, 120]];
+  function obstPix(e, k, dx, dy, dd, r, light, x, y) {
+    var tex = hash(x * 3, y * 7);
+    if (e === 4) {
+      var a = Math.atan2(dy, dx), br = 0.5 + 0.5 * Math.cos(a * 9 + hash(k, 3) * 6 + dd * 0.9);
+      if (dd > r * 0.35 && br < 0.45) return null;                         /* gaps between the branches */
+      var c = CORAL[Math.floor(k / 6) % CORAL.length], m = 0.55 + light * 0.35 + (dd / r) * 0.25;
+      if (dd > r - 1.6 && tex > 0.55) return [255, 236, 242];               /* polyps at the tips */
+      return [Math.min(255, c[0] * m), Math.min(255, c[1] * m), Math.min(255, c[2] * m)];
+    }
+    if (e === 6) {
+      var an = Math.atan2(dy, dx), edge = r * (0.86 + 0.14 * vnoise(an * 9 + k * 13, k * 7, 1.3));
+      if (dd > edge) return dd > edge + 0.5 && dd < r ? [30, 70, 100] : null;          /* the shelf under the water */
+      if (dd > edge - 1.3) return [120, 185, 215];
+      var crackLine = Math.abs(vnoise(x * 0.9 + k * 40, y * 0.9, 9) - 0.5) < 0.025;
+      if (crackLine) return [140, 185, 212];
+      if (tex > 0.93) return [255, 255, 255];
+      var w = 205 + light * 40 + tex * 6; return [w - 10, w, Math.min(255, w + 12)];
+    }
+    if (e === 7) {
+      if (tex > 0.965) return [200, 60, 20];                                 /* glowing cracks */
+      var l7 = dd > r - 1.2 ? 14 : 24 + light * 14 + tex * 6; return [l7, l7 * 0.9, l7 * 0.92];
+    }
+    if (e === 5) { var l5 = dd > r - 1.2 ? 16 : 30 + light * 16 + tex * 8; return [l5 * 0.75, l5, l5 * 0.85]; }
+    var l = dd > r - 1.2 ? 22 : 36 + light * 20 + tex * 9;
+    return [l * 0.82, l * 0.88, l];
+  }
+
+  /* reef caustics: four frames of rippling sunlight, computed once */
+  function caustics() {
+    if (caust) return caust;
+    caust = [];
+    for (var f = 0; f < 4; f++) {
+      var cv = document.createElement('canvas'); cv.width = WP; cv.height = WP;
+      var g = cv.getContext('2d'), img = g.createImageData(WP, WP), d = img.data, ph = f * 1.5708;
+      for (var y = 0; y < WP; y++) for (var x = 0; x < WP; x++) {
+        var v = Math.sin(x * 0.21 + ph) + Math.sin(y * 0.19 - ph * 1.3) + Math.sin((x + y) * 0.13 + ph * 0.7);
+        if (Math.abs(v) < 0.2) { var i = (y * WP + x) * 4; d[i] = 220; d[i + 1] = 250; d[i + 2] = 255; d[i + 3] = 34; }
+      }
+      g.putImageData(img, 0, 0); caust.push(cv);
+    }
+    return caust;
+  }
+
+  /* things drawn in front of the creatures: kelp they hide in, falling snow, smoke */
+  var oc = document.createElement('canvas'); oc.width = WP; oc.height = WP; var og = oc.getContext('2d');
+  function drawFront(now) {
+    og.clearRect(0, 0, WP, WP);
+    var i, j, k;
+    if (ENV === 5) {
+      for (i = 0; i < kelpZ.length; i++) {
+        var zx = kelpZ[i][0] / 1000 * WP, zy = kelpZ[i][1] / 1000 * WP, zr = kelpZ[i][2] / 1000 * WP, ns = Math.round(zr * 0.55);
+        for (j = 0; j < ns; j++) {
+          var a = hash(i * 31 + j, 5) * 6.2832, rr = Math.sqrt(hash(j, i * 7 + 1)) * zr * 0.9, bx = zx + Math.cos(a) * rr, by = zy + Math.sin(a) * rr * 0.8 + zr * 0.35;
+          var h = zr * (0.7 + hash(j, i) * 0.8);
+          for (k = 0; k < h; k++) {
+            var u = k / h, sx = bx + Math.sin(now / 900 + j * 1.7 + k * 0.12) * u * 3.2, sy = by - k;
+            og.fillStyle = (k & 2) ? 'rgba(63,143,58,0.88)' : 'rgba(84,170,64,0.88)'; og.fillRect(Math.round(sx), Math.round(sy), 1, 1);
+            if (k % 5 === 2) { var side = (k / 5) & 1 ? 1 : -1; og.fillStyle = 'rgba(120,200,80,0.8)'; og.fillRect(Math.round(sx + side), Math.round(sy), 1, 1); og.fillRect(Math.round(sx + side * 2), Math.round(sy - 1), 1, 1); }
+          }
+          og.fillStyle = 'rgba(160,230,110,0.9)'; og.fillRect(Math.round(bx + Math.sin(now / 900 + j * 1.7 + h * 0.12) * 3.2), Math.round(by - h), 1, 1);
+        }
+      }
+    }
+    if (ENV === 6) {
+      for (i = 0; i < 150; i++) {
+        var sx2 = (hash(i, 1) * WP + Math.sin(now / 1300 + i) * 4 + now * 0.004) % WP, sy2 = (hash(i, 2) * WP + now * (0.008 + hash(i, 3) * 0.01)) % WP;
+        og.fillStyle = 'rgba(240,248,255,' + (0.45 + hash(i, 4) * 0.45) + ')'; og.fillRect(Math.round(sx2), Math.round(sy2), hash(i, 5) > 0.85 ? 2 : 1, 1);
+      }
+    }
+    if (ENV === 7) {
+      for (i = 0; i < vents.length; i++) {
+        var vx = vents[i][0] / 1000 * WP, vy = vents[i][1] / 1000 * WP, vr = vents[i][2] / 1000 * WP, top = vy - vr * 0.9;
+        for (j = 0; j < 16; j++) {
+          var p = ((now / 2600) + j / 16) % 1, px = vx + Math.sin(p * 5 + j * 2.1) * p * 7, py = top - p * vr * 2.8, pr = Math.round(1 + p * 4);
+          og.globalAlpha = 0.7 * (1 - p); og.drawImage(disc(pr, 'rgba(28,24,26,1)', 0.9, 'smoke' + pr), Math.round(px - pr), Math.round(py - pr)); og.globalAlpha = 1;
+        }
+      }
+    }
   }
 
   /* a dithered pixel disc, used for algae meadows and toxic vents */
@@ -182,15 +293,15 @@
   window.SwEvents = window.SwEvents || {};
   window.SwEvents.frame = function (d) {
     var now = performance.now(), i;
-    if (d.isl !== undefined && d.isl !== view_i) {
-      if (now - switchT < 1500) return;          /* our switch is on its way */
-      adoptIsland(d.isl);                         /* another tab or a reload: follow the server */
-    }
+    if (d.isl !== undefined && d.isl !== view_i) return;   /* someone else is watching another island */
     if (d.maps) maps = d.maps;
+    if (d.env !== undefined && d.env !== ENV) { ENV = d.env; bgc = null; setLegend(); }
     if (d.obst && !bgc) makeBackground(d.obst);
     if (d.ws) WS = d.ws;
     if (d.vents) vents = d.vents;
     if (d.meadows) meadows = d.meadows;
+    if (d.kelp) kelpZ = d.kelp;
+    if (d.env !== undefined && d.env !== ENV) { ENV = d.env; bgc = null; setLegend(); }
     if (last && d.tick < last.tick) { pos = {}; hist = []; }
     if (lastFrameT) gap = gap * 0.8 + clamp(now - lastFrameT, 8, 400) * 0.2;
     lastFrameT = now;
@@ -336,13 +447,13 @@
 
   /* ---------- the islands ---------- */
   function nIsl() { return isls.length || 4; }
-  function islName(i) { return ISL[i % 4].n + (nIsl() > 4 ? ' ' + (Math.floor(i / 4) + 1) : ''); }
+  function islName(i) { return ISL[i % 8].n + (nIsl() > 8 ? ' ' + (Math.floor(i / 8) + 1) : ''); }
   function islandTiles() {
     var el = $('isls'); if (!el) return;
     var n = nIsl();
     if (el.children.length !== n) {
       el.classList.toggle('many', n > 4);
-      var h = ''; for (var q = 0; q < n; q++) h += '<div class="it" data-isl="' + q + '"><canvas id="ic' + q + '" width="96" height="96"></canvas><div class="nm">' + islName(q) + '</div><div class="st" id="is' + q + '">' + ISL[q % 4].d + '</div></div>';
+      var h = ''; for (var q = 0; q < n; q++) h += '<div class="it" data-isl="' + q + '"><canvas id="ic' + q + '" width="96" height="96"></canvas><div class="nm">' + islName(q) + '</div><div class="st" id="is' + q + '">' + ISL[q % 8].d + '</div></div>';
       el.innerHTML = h;
     }
     for (var i = 0; i < n; i++) {
@@ -351,22 +462,24 @@
       if (st && sm && sm.length) st.innerHTML = n > 4 ? sm[1] + ' alive &middot; ' + sm[2] + ' sp' : sm[1] + ' alive &middot; ' + sm[2] + ' species';
       var cv = $('ic' + i); if (!cv) continue;
       var g = cv.getContext('2d'), W = cv.width, m = minis[i];
-      var pl = PAL[i % 4]; g.fillStyle = 'rgb(' + (pl[0] + 2) + ',' + (pl[1] + 2) + ',' + (pl[2] + 2) + ')'; g.fillRect(0, 0, W, W);
-      var mp = maps && maps[i % 4];
+      var pl = PAL[i % 8]; g.fillStyle = 'rgb(' + (pl[0] + 2) + ',' + (pl[1] + 2) + ',' + (pl[2] + 2) + ')'; g.fillRect(0, 0, W, W);
+      var mp = maps && maps[i % 8], te = i % 8;
       if (mp) {
-        for (var o = 0; o < mp[0].length; o++) { g.fillStyle = 'rgba(120,128,140,0.7)'; g.beginPath(); g.arc(mp[0][o][0] / 1000 * W, mp[0][o][1] / 1000 * W, mp[0][o][2] / 1000 * W, 0, 6.2832); g.fill(); }
-        for (var v = 0; v < mp[1].length; v++) { g.fillStyle = 'rgba(160,70,210,0.65)'; g.beginPath(); g.arc(mp[1][v][0] / 1000 * W, mp[1][v][1] / 1000 * W, mp[1][v][2] / 1000 * W, 0, 6.2832); g.fill(); }
+        if (mp[2]) for (var kz = 0; kz < mp[2].length; kz++) { g.fillStyle = 'rgba(70,150,60,0.6)'; g.beginPath(); g.arc(mp[2][kz][0] / 1000 * W, mp[2][kz][1] / 1000 * W, mp[2][kz][2] / 1000 * W, 0, 6.2832); g.fill(); }
+        for (var o = 0; o < mp[0].length; o++) { g.fillStyle = te === 4 ? 'rgba(255,120,170,0.85)' : te === 6 ? 'rgba(225,240,250,0.9)' : 'rgba(120,128,140,0.7)'; g.beginPath(); g.arc(mp[0][o][0] / 1000 * W, mp[0][o][1] / 1000 * W, mp[0][o][2] / 1000 * W, 0, 6.2832); g.fill(); }
+        for (var v = 0; v < mp[1].length; v++) { g.fillStyle = te === 7 ? 'rgba(255,120,40,0.8)' : te === 6 ? 'rgba(40,150,150,0.8)' : te === 4 ? 'rgba(255,160,210,0.7)' : 'rgba(160,70,210,0.65)'; g.beginPath(); g.arc(mp[1][v][0] / 1000 * W, mp[1][v][1] / 1000 * W, mp[1][v][2] / 1000 * W, 0, 6.2832); g.fill(); }
       }
       if (m) for (var k = 0; k < m.cr.length; k++) { g.fillStyle = hsl(m.cr[k][2], 70, 58); g.fillRect(Math.round(m.cr[k][0] / 1000 * W) - 1, Math.round(m.cr[k][1] / 1000 * W) - 1, 2, 2); }
     }
   }
   var switchT = 0;
-  function adoptIsland(i) { view_i = i; pos = {}; hist = []; sptree = []; net = null; kar = null; ped = null; bgc = null; vents = []; meadows = []; if (inspId) closeInsp(); }
+  function adoptIsland(i) { ENV = -1; kelpZ = []; view_i = i; pos = {}; hist = []; sptree = []; net = null; kar = null; ped = null; bgc = null; vents = []; meadows = []; if (inspId) closeInsp(); }
   function switchIsland(i) {
     if (i === view_i) return;
     switchT = performance.now();
+    ENV = -1; kelpZ = [];
     view_i = i; pos = {}; hist = []; sptree = []; net = null; kar = null; ped = null; last = null; bgc = null; vents = []; meadows = [];
-    closeInsp(); window.swSend('view', { i: i });
+    closeInsp(); window.swSend('view', { i: i, fresh: 1 });
     var f = $('feed'); if (f) f.innerHTML = '';
   }
 
@@ -497,6 +610,9 @@
     var g = wg, d = last, i, f = Math.floor(now / 400) & 1;
     if (bgc) g.drawImage(bgc, 0, 0); else { g.fillStyle = '#080a10'; g.fillRect(0, 0, WP, WP); }
     if (!d) return;
+    if (ENV === 4) g.drawImage(caustics()[Math.floor(now / 260) % 4], 0, 0);
+    if (ENV === 5) { g.fillStyle = 'rgba(120,200,190,0.05)'; for (var sh = 0; sh < 3; sh++) { var o0 = ((now * 0.006 + sh * 110) % (WP + 160)) - 80; g.beginPath(); g.moveTo(o0, 0); g.lineTo(o0 + 30, 0); g.lineTo(o0 - 50, WP); g.lineTo(o0 - 80, WP); g.closePath(); g.fill(); } }
+    if (ENV >= 4) { drawEnvHazards(g, now, f); drawEnvFood(g, d, now, f); return; }
     for (i = 0; i < meadows.length; i++) {
       var mr = meadows[i][2] / 1000 * WP, md = disc(mr, MEAD[view_i % 4], 0.55, 'm' + (view_i % 4) + Math.round(mr));
       g.drawImage(md, Math.round(meadows[i][0] / 1000 * WP - md.width / 2), Math.round(meadows[i][1] / 1000 * WP - md.height / 2));
@@ -528,6 +644,56 @@
       g.fillStyle = '#ffb3a1'; g.fillRect(mx - r + 1, my - r, 1, 1);
     }
   }
+  function drawEnvHazards(g, now, f) {
+    var i, j;
+    for (i = 0; i < vents.length; i++) {
+      var vx = vents[i][0] / 1000 * WP, vy = vents[i][1] / 1000 * WP, vr = vents[i][2] / 1000 * WP;
+      if (ENV === 4) {           /* a jellyfish bloom: pulsing translucent bells */
+        for (j = 0; j < 6; j++) {
+          var a = hash(j, i + 9) * 6.2832 + now / 6000, rr = hash(i, j + 3) * vr * 0.85, jx = Math.round(vx + Math.cos(a) * rr), jy = Math.round(vy + Math.sin(a) * rr), pu = (Math.floor(now / 300) + j) & 1;
+          g.fillStyle = 'rgba(255,154,208,0.75)'; g.fillRect(jx - 2 - pu, jy - 2, 5 + pu * 2, 2); g.fillRect(jx - 1, jy - 3, 3, 1);
+          g.fillStyle = 'rgba(255,200,230,0.6)'; for (var t = 0; t < 3; t++) g.fillRect(jx - 2 + t * 2, jy + ((t + Math.floor(now / 200)) & 1), 1, 2);
+        }
+      } else if (ENV === 5) {    /* an urchin barren: spiky purple balls */
+        for (j = 0; j < 9; j++) {
+          var ux = Math.round(vx + (hash(j, i) - 0.5) * vr * 1.6), uy = Math.round(vy + (hash(i, j) - 0.5) * vr * 1.6);
+          g.fillStyle = '#3a1450'; g.fillRect(ux - 1, uy - 1, 3, 3); g.fillStyle = '#7a3fa0';
+          g.fillRect(ux - 2, uy, 1, 1); g.fillRect(ux + 2, uy, 1, 1); g.fillRect(ux, uy - 2, 1, 1); g.fillRect(ux, uy + 2, 1, 1); g.fillRect(ux - 2, uy - 2, 1, 1); g.fillRect(ux + 2, uy + 2, 1, 1);
+        }
+      } else if (ENV === 6) {    /* a brine pool */
+        var bd = disc(vr, 'rgba(20,90,90,0.85)', 0.9, 'brine' + Math.round(vr)); g.drawImage(bd, Math.round(vx - bd.width / 2), Math.round(vy - bd.height / 2));
+        for (j = 0; j < 20; j++) { var ba = j / 20 * 6.2832; if (((Math.floor(now / 250) + j) % 5) === 0) { g.fillStyle = '#e8ffff'; g.fillRect(Math.round(vx + Math.cos(ba) * vr), Math.round(vy + Math.sin(ba) * vr), 1, 1); } }
+      } else if (ENV === 7) {    /* a black smoker: heat glow, chimney, glowing mouth */
+        var gd = disc(vr * 1.7, 'rgba(255,90,20,0.22)', 0.75, 'heat' + Math.round(vr)); g.drawImage(gd, Math.round(vx - gd.width / 2), Math.round(vy - gd.height / 2));
+        var hd2 = disc(vr, 'rgba(255,140,40,0.35)', 0.8, 'hot' + Math.round(vr)); g.drawImage(hd2, Math.round(vx - hd2.width / 2), Math.round(vy - hd2.height / 2));
+        var ch = Math.round(vr * 0.9), cw = Math.max(3, Math.round(vr * 0.28));
+        for (var yy = 0; yy < ch; yy++) { var wv = cw + (yy > ch * 0.6 ? 1 : 0); g.fillStyle = (yy & 1) ? '#262022' : '#322a2c'; g.fillRect(Math.round(vx - wv / 2), Math.round(vy - yy), wv, 1); }
+        g.fillStyle = (f ? '#ffb040' : '#ff7a20'); g.fillRect(Math.round(vx - cw / 2), Math.round(vy - ch), cw, 1); g.fillStyle = '#fff0b0'; g.fillRect(Math.round(vx), Math.round(vy - ch), 1, 1);
+      }
+    }
+  }
+  function drawEnvFood(g, d, now, f) {
+    var i;
+    for (i = 0; d.poison && i < d.poison.length; i++) {
+      var qx = Math.round(d.poison[i][0] / 1000 * WP), qy = Math.round(d.poison[i][1] / 1000 * WP);
+      if (ENV === 4) { g.fillStyle = 'rgba(255,154,208,0.8)'; g.fillRect(qx - 1, qy - 1, 3, 1); g.fillRect(qx, qy, 1, 2); }
+      else if (ENV === 5) { g.fillStyle = '#7a3fa0'; g.fillRect(qx, qy, 1, 1); g.fillRect(qx - 1, qy, 1, 1); g.fillRect(qx + 1, qy, 1, 1); g.fillRect(qx, qy - 1, 1, 1); g.fillRect(qx, qy + 1, 1, 1); }
+      else if (ENV === 6) { g.fillStyle = (f ^ (i & 1)) ? '#2fb0a0' : '#1f8070'; g.fillRect(qx - 1, qy, 2, 2); }
+      else { g.fillStyle = (f ^ (i & 1)) ? '#f0dc50' : '#c8b030'; g.fillRect(qx, qy - 1, 1, 2); g.fillRect(qx - 1, qy, 3, 1); }
+    }
+    for (i = 0; i < d.plants.length; i++) {
+      var x = Math.round(d.plants[i][0] / 1000 * WP), y = Math.round(d.plants[i][1] / 1000 * WP), h = hash(d.plants[i][0], d.plants[i][1]);
+      if (ENV === 4) { g.fillStyle = (f ^ (h > 0.5)) ? '#e6fbff' : '#9fe8f5'; g.fillRect(x, y, 1, 1); g.fillStyle = 'rgba(190,240,255,0.6)'; g.fillRect(x + 1, y + 1, 1, 1); if (h > 0.5) g.fillRect(x - 1, y + 1, 1, 1); }
+      else if (ENV === 5) { g.fillStyle = '#5a7a2a'; g.fillRect(x - 1, y, 3, 2); g.fillStyle = (f ^ (h > 0.5)) ? '#a8e060' : '#8fd14f'; g.fillRect(x, y - 1, 2, 1); }
+      else if (ENV === 6) { g.fillStyle = '#ff9a7a'; g.fillRect(x - 1, y, 3, 1); g.fillStyle = '#ffd0b8'; g.fillRect(x + 1 + (f ? 1 : 0), y - 1, 1, 1); }
+      else { g.fillStyle = '#e8e0d0'; g.fillRect(x, y - 1, 1, 3); g.fillStyle = (f ^ (h > 0.5)) ? '#ff3a3a' : '#c81e28'; g.fillRect(x - 1, y - 2, 3, 1); }
+    }
+    for (i = 0; i < d.meat.length; i++) {
+      var mx = Math.round(d.meat[i][0] / 1000 * WP), my = Math.round(d.meat[i][1] / 1000 * WP);
+      g.fillStyle = '#6b1d24'; g.fillRect(mx - 1, my, 3, 2); g.fillStyle = '#c4423f'; g.fillRect(mx, my - 1, 1, 2);
+    }
+  }
+
   function SX(u) { return view.ox + u * view.s; }
   function SY(u) { return view.oy + u * view.s; }
   function drawArena(now) {
@@ -538,9 +704,12 @@
     ag.strokeStyle = 'rgba(255,255,255,0.10)'; ag.lineWidth = 1; ag.strokeRect(view.ox - 0.5, view.oy - 0.5, view.s + 1, view.s + 1);
     if (!last) return;
     ag.font = '600 10px ui-sans-serif,-apple-system,sans-serif'; ag.textAlign = 'center';
-    for (i = 0; i < vents.length; i++) { ag.fillStyle = 'rgba(214,140,255,0.75)'; ag.fillText('TOXIC VENT', SX(vents[i][0] / 1000), SY(vents[i][1] / 1000) + vents[i][2] / 1000 * view.s + 12); }
-    for (i = 0; i < meadows.length; i++) { ag.fillStyle = 'rgba(110,230,170,0.35)'; ag.fillText('algae meadow', SX(meadows[i][0] / 1000), SY(meadows[i][1] / 1000) - meadows[i][2] / 1000 * view.s - 4); }
-    ag.fillStyle = 'rgba(190,200,215,0.45)'; if (view_i % 4 === 0) ag.fillText('ROCK REEF', SX(1.28 / WS), SY(1.03 / WS)); if (view_i % 4 === 2) ag.fillText('BOULDER MAZE', SX(0.5), SY(0.5) + 34);
+    var VL = ['TOXIC VENT', 'TOXIC VENT', 'TOXIC VENT', 'TOXIC VENT', 'JELLYFISH BLOOM', 'URCHIN BARREN', 'BRINE POOL', 'BLACK SMOKER'], VC = ['rgba(214,140,255,0.75)', 'rgba(214,140,255,0.75)', 'rgba(214,140,255,0.75)', 'rgba(214,140,255,0.75)', 'rgba(255,170,215,0.8)', 'rgba(190,140,230,0.75)', 'rgba(140,230,220,0.8)', 'rgba(255,170,90,0.85)'];
+    var ev = ENV < 0 ? 0 : ENV;
+    for (i = 0; i < vents.length; i++) { ag.fillStyle = VC[ev]; ag.fillText(VL[ev], SX(vents[i][0] / 1000), SY(vents[i][1] / 1000) + vents[i][2] / 1000 * view.s + 12); }
+    if (ENV < 4) for (i = 0; i < meadows.length; i++) { ag.fillStyle = 'rgba(110,230,170,0.35)'; ag.fillText('algae meadow', SX(meadows[i][0] / 1000), SY(meadows[i][1] / 1000) - meadows[i][2] / 1000 * view.s - 4); }
+    if (ENV === 5) for (i = 0; i < kelpZ.length; i++) { ag.fillStyle = 'rgba(160,230,120,0.45)'; ag.fillText('KELP BED', SX(kelpZ[i][0] / 1000), SY(kelpZ[i][1] / 1000) + kelpZ[i][2] / 1000 * view.s * 0.5 + 16); }
+    ag.fillStyle = 'rgba(190,200,215,0.45)'; if (ENV === 0) ag.fillText('ROCK REEF', SX(1.28 / WS), SY(1.03 / WS)); if (ENV === 2) ag.fillText('BOULDER MAZE', SX(0.5), SY(0.5) + 34);
     var k = view.k, i;
     for (i = 0; i < last.preds.length && i < predPos.length; i++) {
       var pr = last.preds[i], q = predPos[i], u = clamp((now - q.t) / gap, 0, 1), x = SX(q.x0 + (q.x1 - q.x0) * u), y = SY(q.y0 + (q.y1 - q.y0) * u), mode = pr[2];
@@ -576,6 +745,7 @@
       if (c[1] === inspId) sel = [cx, cy, s, c];
       if (c[1] === hover) hov = [cx, cy, s, c];
     }
+    if (ENV >= 5) { drawFront(now); ag.imageSmoothingEnabled = false; ag.drawImage(oc, view.ox, view.oy, view.s, view.s); }
     if (hov && (!sel || hov[3][1] !== sel[3][1])) { ag.strokeStyle = 'rgba(255,255,255,0.55)'; ag.lineWidth = 1.2; ag.beginPath(); ag.arc(hov[0], hov[1], hov[2].h * k * 0.62, 0, 6.2832); ag.stroke(); }
     if (sel) {
       var R = sel[2].h * k * 0.62 + 2 + Math.sin(now / 250) * 1.5;
@@ -664,6 +834,9 @@
     drawArena(now);
     if (inspId) { drawBrain(now); drawGenome(now); drawPed(); }
   }
+  /* tell the server which island this page watches (several viewers can watch different islands) */
+  setInterval(function () { if (window.swSend) window.swSend('view', { i: view_i }); }, 2000);
+  setTimeout(function () { if (window.swSend) window.swSend('view', { i: view_i, fresh: 1 }); }, 300);
   window.__swEvolve3 = { get last() { return last; }, sprite: spriteOf };
   resize();
   requestAnimationFrame(frame);
