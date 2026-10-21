@@ -579,6 +579,20 @@ fun scan_crs(crs, c, best, sig, cnt) {
     }
 }
 
+# the predators are creatures too: a "hunter" is any stranger that is stronger than me (attack x size)
+fun power(c) { nth(g(c, 'ph'), 3) * nth(g(c, 'ph'), 0) }
+fun nearest_hunter(crs, c, mine, best) {
+    if (length(crs) == 0) { best }
+    else {
+        o = hd(crs)
+        dx = g(o, 'x') - g(c, 'x')
+        dy = g(o, 'y') - g(c, 'y')
+        d = Math.sqrt(dx * dx + dy * dy)
+        ok = g(o, 'id') != g(c, 'id') && g(o, 'sp') != g(c, 'sp') && power(o) > mine && nth(g(o, 'ph'), 3) >= 0.8
+        nearest_hunter(tl(crs), c, mine, if (ok && (best == nil || d < hd(best))) { [d, dx, dy, o] } else { best })
+    }
+}
+
 fun nearest_pred(lst, x, y, best) {
     if (length(lst) == 0) { best }
     else {
@@ -618,9 +632,9 @@ fun senses(s, c) {
     kin = if (seen) { fmax(0.0, 1.0 - body_dist(ph, g(o, 'ph'), 0) / 2.5) } else { 0.0 }
     sz = if (seen) { nth(g(o, 'ph'), 0) - nth(ph, 0) } else { 0.0 }
     osig = if (seen) { g(o, 'sig') } else { 0.0 }
-    pr = if (g(s, 'pred_on') == 1) { nearest_pred(g(s, 'preds'), x, y, nil) } else { nil }
-    pv = see(pr, sight * 1.3, hx, hy)
-    threat = if (pr == nil || hd(pr) > sight * 1.3) { 0.0 } else { if (nth(pr, 3) == 1) { 1.0 } else { if (nth(pr, 3) == 3) { 0.5 } else { 0.0 } } }
+    hn = nearest_hunter(g(s, 'crs'), c, power(c), nil)
+    pv = see(hn, sight * 1.3, hx, hy)
+    threat = if (hn == nil || hd(hn) > sight * 1.3) { 0.0 } else { if (g(nth(hn, 3), 'bite') == 1) { 1.0 } else { 0.5 } }
     wa = 1.0 - fmin(wall_t(x, y, hx, hy), 0.25) / 0.25
     [1.0, hd(pl), nth(pl, 1), hd(mt), nth(mt, 1), hd(cv), nth(cv, 1), kin, sz, osig,
      hd(pv), nth(pv, 1), threat, wa, g(c, 'e') / 100.0, g(c, 'h') / 100.0, if (g(c, 'pain') > 0) { 1.0 } else { 0.0 }, elem(sc, 1)]
@@ -963,7 +977,14 @@ fun immigrate(tab, world, s) {
 }
 
 # a new world is colonised by a few ancestral lineages, each founder a variant of one
-fun ancestors(k) { if (k <= 0) { [] } else { [random_hap() | ancestors(k - 1)] } }
+fun ancestors(k) { if (k <= 0) { [] } else { [if (k <= 2) { hunter_hap() } else { random_hap() } | ancestors(k - 1)] } }
+
+# a meat-eating, spiky body plan; its brain is as random as everyone else's
+fun hunter_hap() {
+    h = random_hap()
+    p(h, 'b', set_locus(set_locus(set_locus(g(h, 'b'), 5, 0.8), 3, 1.4), 0, 1.2))
+}
+fun set_locus(b, k, v) { if (k == 0) { [[v, nth(hd(b), 1)] | tl(b)] } else { [hd(b) | set_locus(tl(b), k - 1, v)] } }
 fun founders(tab, world, s, k) { founders_from(tab, world, s, k, ancestors(6)) }
 fun founders_from(tab, world, s, k, ancs) {
     if (k <= 0) { s }
@@ -1127,7 +1148,7 @@ fun step(tab, s) {
     crs1 = act_all(tab, crs0, [])
     s1 = feed_all(p(s0, 'crs', []), crs1, [])
     crs2 = fight(g(s1, 'crs'), g(s1, 'crs'))
-    s2 = if (g(s1, 'pred_on') == 1) { preds_step(p(s1, 'crs', crs2), g(s1, 'preds'), []) } else { p(s1, 'crs', crs2) }
+    s2 = p(s1, 'crs', crs2)
     s3 = reap(p(p(p(s2, 'crs', []), 'meat', age_meat(g(s2, 'meat'))), 'plants', grow_plants(g(s2, 'plants'), g(s2, 'tick'))), map_vitals(g(s2, 'crs'), []), [])
     s4 = breed(tab, self(), s3, ids_of(g(s3, 'crs')))
     tick = g(s4, 'tick') + 1
@@ -1231,7 +1252,7 @@ fun frame(tab, s, tick, left, sp) {
         kar: if (sc != nil && full) { %{a: kar(g(g(sc, 'ha'), 'b'), 0), b: kar(g(g(sc, 'hb'), 'b'), 0),
                                         an: [length(g(g(sc, 'ha'), 'n')), length(g(g(sc, 'ha'), 'c'))], bn: [length(g(g(sc, 'hb'), 'n')), length(g(g(sc, 'hb'), 'c'))],
                                         mom: g(sc, 'mom'), dad: g(sc, 'dad')} } else { nil },
-        plants: plant_pts(g(s, 'plants')), meat: meat_pts(g(s, 'meat')), preds: if (g(s, 'pred_on') == 1) { pred_pts(g(s, 'preds')) } else { [] },
+        plants: plant_pts(g(s, 'plants')), meat: meat_pts(g(s, 'meat')), preds: [],
         obst: if (tick % 30 == 0) { obst_pts(obstacles()) } else { nil },
         pop: length(crs), maxgen: g(s, 'maxgen'), b_sex: g(s, 'b_sex'), b_bud: g(s, 'b_bud'), b_imm: g(s, 'b_imm'),
         d_starve: g(s, 'd_starve'), d_pred: g(s, 'd_pred'), d_eaten: g(s, 'd_eaten'), d_old: g(s, 'd_old'),
@@ -1350,7 +1371,7 @@ fun render(assigns) {
         "<div class=\"card world\" id=\"arena\"><canvas id=\"arena-cv\" sw-keep></canvas>" ++
         "<div class=\"hud\"><div class=\"head\" id=\"head\" sw-keep><span class=\"big\">Generation &ndash;</span>waiting for the world</div>" ++
         "<div class=\"seg\"><button data-speed=\"1\">1x</button><button data-speed=\"2\">fast</button><button data-speed=\"3\">turbo</button></div></div>" ++
-        "<div class=\"legend\"><span><i style=\"background:#50e3c2\"></i>algae (food)</span><span><i style=\"background:#c4423f\"></i>meat (the dead)</span><span><i style=\"background:#ff3b3b\"></i>predator</span>" ++
+        "<div class=\"legend\"><span><i style=\"background:#50e3c2\"></i>algae (food)</span><span><i style=\"background:#c4423f\"></i>meat (the dead)</span><span><i style=\"background:#ff4b3a\"></i>red spikes = meat-eating hunter</span>" ++
         "<span style=\"color:#6b6b6b\">microbe: spikes = attack &middot; grey plates = armor &middot; tail = speed &middot; eye = sight &middot; glow = signalling</span></div>" ++
         "<div class=\"tip\" id=\"tip\" sw-keep></div><div class=\"toast\" id=\"toast\" sw-keep></div></div>" ++
         "<div class=\"side\">" ++
@@ -1359,9 +1380,9 @@ fun render(assigns) {
         "<div class=\"card\"><h3>The whole run <span id=\"run-span\">since this world began</span></h3><div class=\"sm\" id=\"sm\" sw-keep></div><div class=\"note\" id=\"run-note\" sw-keep></div></div>" ++
         "<div class=\"card\"><h3>Species alive <span>click one to inspect a member</span></h3><div id=\"spl\" sw-keep></div></div>" ++
         "<div class=\"card\"><h3>What just happened</h3><div id=\"feed\" sw-keep></div></div>" ++
-        "<div class=\"card\"><h3>Experiment</h3><div class=\"btns\"><button class=\"btn on\" id=\"b-pred\">Predators: on</button><button class=\"btn on\" id=\"b-plast\">Learning: on</button>" ++
+        "<div class=\"card\"><h3>Experiment</h3><div class=\"btns\"><button class=\"btn on\" id=\"b-plast\">Learning: on</button>" ++
         "<button class=\"btn\" id=\"b-save\">Save checkpoint</button><button class=\"btn\" id=\"b-load\">Load checkpoint</button><button class=\"btn danger\" id=\"b-reset\">New random world</button></div>" ++
-        "<p class=\"cap\">No fitness function and no teacher. A brain is <b>built from the genes</b>, one swarmrt process per neuron. Creatures that find food and mates leave children; the rest die. Genes come in <b>two copies</b> that cross over and mutate; synapses also learn during a life by a rule that itself evolves. Turn <b>Learning</b> off to test whether that rule matters.</p></div>" ++
+        "<p class=\"cap\">No fitness function, no teacher and no scripted predators: every hunter is an evolved creature too. A brain is <b>built from the genes</b>, one swarmrt process per neuron. Creatures that find food and mates leave children; the rest die. Genes come in <b>two copies</b> that cross over and mutate; synapses also learn during a life by a rule that itself evolves. Turn <b>Learning</b> off to test whether that rule matters.</p></div>" ++
         "</div>" ++
         "<div class=\"pg off\" id=\"pg-insp\">" ++
         "<div class=\"card\"><div class=\"ih\"><canvas id=\"i-spr\" width=\"32\" height=\"32\" sw-keep></canvas><div><div class=\"tt\" id=\"i-title\" sw-keep>&ndash;</div><div class=\"st\" id=\"i-sub\" sw-keep></div></div><button class=\"x\" id=\"b-close\">Back</button></div>" ++

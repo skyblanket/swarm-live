@@ -34,7 +34,7 @@ fun js() {
     "  var sprites = {}, spriteN = 0, AW = 0, AH = 0, view = { s: 1, ox: 0, oy: 0, k: 1 };\n" ++
     "  var pos = {}, predPos = [], hover = null, mouse = null, inspId = 0;\n" ++
     "  var SENS = ['bias', 'plant dir', 'plant near', 'meat dir', 'meat near', 'other dir', 'other near', 'kinship', 'its size', 'its signal',\n" ++
-    "    'predator dir', 'predator near', 'threat', 'wall ahead', 'energy', 'health', 'pain', 'heard'];\n" ++
+    "    'hunter dir', 'hunter near', 'hunter biting', 'wall ahead', 'energy', 'health', 'pain', 'heard'];\n" ++
     "  var OUTS = ['turn', 'thrust', 'bite', 'signal', 'mate'];\n" ++
     "  var LOCI = ['size', 'speed', 'armor', 'attack', 'sight', 'diet', 'hue', 'pattern', 'pattern', 'pattern', 'mutation', 'plasticity', 'rule A', 'rule B', 'rule C', 'rule D', 'mod base', 'fertility', 'choosiness'];\n" ++
     "  var LGROUP = [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 3, 3, 3, 3, 3, 3, 4, 4];\n" ++
@@ -216,7 +216,7 @@ fun js() {
     "    var op = $('o-procs'); if (op) op.textContent = fmtc(d.nn);\n" ++
     "    var ck = $('o-ck'); if (ck) { var ago = d.tick - d.ck_tick; ck.textContent = d.ck ? 'saved ' + (tps > 0 ? Math.round(ago / tps) + 's ago' : 'just now') : 'not saved yet'; }\n" ++
     "    var sb = document.querySelectorAll('[data-speed]'); for (var i = 0; i < sb.length; i++) sb[i].classList.toggle('on', Number(sb[i].getAttribute('data-speed')) === Math.max(1, d.speed));\n" ++
-    "    tog('b-pred', 'Predators: ', d.pred_on); tog('b-plast', 'Learning: ', d.plast);\n" ++
+    "    tog('b-plast', 'Learning: ', d.plast);\n" ++
     "    insights(d, nnb); runCharts(d, nnb); speciesList(d);\n" ++
     "    if (inspId) inspector(d);\n" ++
     "  }\n" ++
@@ -340,7 +340,6 @@ fun js() {
     "    var t = e.target.closest ? e.target.closest('[data-speed],#b-pred,#b-plast,#b-save,#b-load,#b-reset,#b-close,.spr') : null;\n" ++
     "    if (!t) return;\n" ++
     "    if (t.hasAttribute('data-speed')) window.swSend('speed', { k: Number(t.getAttribute('data-speed')) });\n" ++
-    "    else if (t.id === 'b-pred') window.swSend('pred', {});\n" ++
     "    else if (t.id === 'b-plast') window.swSend('plast', {});\n" ++
     "    else if (t.id === 'b-save') { window.swSend('save', {}); toast('Saving checkpoint...'); }\n" ++
     "    else if (t.id === 'b-load') { window.swSend('load', {}); toast('Loading checkpoint...'); }\n" ++

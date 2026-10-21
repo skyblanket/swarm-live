@@ -27,7 +27,7 @@
   var sprites = {}, spriteN = 0, AW = 0, AH = 0, view = { s: 1, ox: 0, oy: 0, k: 1 };
   var pos = {}, predPos = [], hover = null, mouse = null, inspId = 0;
   var SENS = ['bias', 'plant dir', 'plant near', 'meat dir', 'meat near', 'other dir', 'other near', 'kinship', 'its size', 'its signal',
-    'predator dir', 'predator near', 'threat', 'wall ahead', 'energy', 'health', 'pain', 'heard'];
+    'hunter dir', 'hunter near', 'hunter biting', 'wall ahead', 'energy', 'health', 'pain', 'heard'];
   var OUTS = ['turn', 'thrust', 'bite', 'signal', 'mate'];
   var LOCI = ['size', 'speed', 'armor', 'attack', 'sight', 'diet', 'hue', 'pattern', 'pattern', 'pattern', 'mutation', 'plasticity', 'rule A', 'rule B', 'rule C', 'rule D', 'mod base', 'fertility', 'choosiness'];
   var LGROUP = [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 3, 3, 3, 3, 3, 3, 4, 4];
@@ -209,7 +209,7 @@
     var op = $('o-procs'); if (op) op.textContent = fmtc(d.nn);
     var ck = $('o-ck'); if (ck) { var ago = d.tick - d.ck_tick; ck.textContent = d.ck ? 'saved ' + (tps > 0 ? Math.round(ago / tps) + 's ago' : 'just now') : 'not saved yet'; }
     var sb = document.querySelectorAll('[data-speed]'); for (var i = 0; i < sb.length; i++) sb[i].classList.toggle('on', Number(sb[i].getAttribute('data-speed')) === Math.max(1, d.speed));
-    tog('b-pred', 'Predators: ', d.pred_on); tog('b-plast', 'Learning: ', d.plast);
+    tog('b-plast', 'Learning: ', d.plast);
     insights(d, nnb); runCharts(d, nnb); speciesList(d);
     if (inspId) inspector(d);
   }
@@ -333,7 +333,6 @@
     var t = e.target.closest ? e.target.closest('[data-speed],#b-pred,#b-plast,#b-save,#b-load,#b-reset,#b-close,.spr') : null;
     if (!t) return;
     if (t.hasAttribute('data-speed')) window.swSend('speed', { k: Number(t.getAttribute('data-speed')) });
-    else if (t.id === 'b-pred') window.swSend('pred', {});
     else if (t.id === 'b-plast') window.swSend('plast', {});
     else if (t.id === 'b-save') { window.swSend('save', {}); toast('Saving checkpoint...'); }
     else if (t.id === 'b-load') { window.swSend('load', {}); toast('Loading checkpoint...'); }
