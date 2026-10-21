@@ -65,7 +65,8 @@ fun fabs(a) { if (a < 0.0) { 0.0 - a } else { a } }
 fun clampf(v, lo, hi) { if (v < lo) { lo } else { if (v > hi) { hi } else { v } } }
 fun g(s, k) { map_get(s, k) }
 fun p(s, k, v) { map_put(s, k, v) }
-fun app(a, b) { if (length(a) == 0) { b } else { [hd(a) | app(tl(a), b)] } }
+fun app(a, b) { app_rev(rev(a, []), b) }
+fun app_rev(ra, b) { if (length(ra) == 0) { b } else { app_rev(tl(ra), [hd(ra) | b]) } }
 fun nth(lst, k) { if (k <= 0) { hd(lst) } else { nth(tl(lst), k - 1) } }
 fun rev(l, acc) { if (length(l) == 0) { acc } else { rev(tl(l), [hd(l) | acc]) } }
 fun lo(k) { nth(LO, k) }
@@ -1214,9 +1215,14 @@ fun tree_kill(tree, evs, tick) {
     if (length(evs) == 0) { tree }
     else { e = hd(evs)  tree_kill(if (hd(e) == 10) { tree_mark(tree, nth(e, 3), tick) } else { tree }, tl(evs), tick) }
 }
-fun tree_mark(tree, sid, tick) {
-    if (length(tree) == 0) { [] }
-    else { r = hd(tree)  if (hd(r) == sid && nth(r, 4) == 0) { [[hd(r), nth(r, 1), nth(r, 2), nth(r, 3), tick] | tl(tree)] } else { [r | tree_mark(tl(tree), sid, tick)] } }
+fun tree_mark(tree, sid, tick) { tm_acc(tree, sid, tick, []) }
+fun tm_acc(tree, sid, tick, seen) {
+    if (length(tree) == 0) { rev(seen, []) }
+    else {
+        r = hd(tree)
+        if (hd(r) == sid && nth(r, 4) == 0) { app(rev(seen, []), [[hd(r), nth(r, 1), nth(r, 2), nth(r, 3), tick] | tl(tree)]) }
+        else { tm_acc(tl(tree), sid, tick, [r | seen]) }
+    }
 }
 fun tree_seed(sps) { if (length(sps) == 0) { [] } else { r = hd(sps)  [[hd(r), 0, nth(r, 2), nth(r, 3), 0] | tree_seed(tl(sps))] } }
 fun fix_tree(l) { if (l == nil) { [] } else { rev(fh_acc(l, []), []) } }
@@ -1345,11 +1351,16 @@ fun recv_migrants(tab, world, s) {
 fun emigrate(tab, s, tick) {
     isl = g(s, 'isl')
     crs = g(s, 'crs')
-    due = tick % 700 == (isl * 175) % 700 && length(crs) > 20 && rndf() < 0.7
+    # while the Toxic Marsh is nearly empty, the other islands send it colonists four times as often
+    marsh = cget(tab, k_isl + 400 + 1)
+    marsh_low = isl != 1 && marsh != nil && nth(marsh, 1) < 10
+    normal = tick % 700 == (isl * 175) % 700 && rndf() < 0.7
+    rescue = marsh_low && tick % 175 == (isl * 43) % 175
+    due = (normal || rescue) && length(crs) > 20
     if (due == false) { s }
     else {
         c = nth(crs, rndi(length(crs)))
-        dest = (isl + 1 + rndi(n_isl - 1)) % n_isl
+        dest = if (rescue) { 1 } else { (isl + 1 + rndi(n_isl - 1)) % n_isl }
         pid = cget(tab, k_isl + 300 + dest)
         if (pid == nil || g(c, 'age') < 300) { s }
         else {
