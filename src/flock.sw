@@ -16,6 +16,7 @@ module Main
 
 import LiveView
 import FlockJs
+import Observer
 import Math
 import Std
 
@@ -416,12 +417,16 @@ fun main() {
     spawn_boids(sup, tab, 0)
     register('flock_in', spawn(inbox(tab, map_new())))
     spawn(coordinator(tab, 0))
-    LiveView.start(4008, %{
-        title: "Flock",
-        js: FlockJs.js(),
-        mount: mount,
-        render: render,
-        handle_event: handle_event,
-        handle_info: handle_info
-    })
+    LiveView.start(4008, [
+        {"/", %{
+            title: "Flock",
+            js: FlockJs.js(),
+            mount: mount,
+            render: render,
+            handle_event: handle_event,
+            handle_info: handle_info
+        }},
+        # the same Observer you can mount in any app: the flock's 800 processes under the microscope
+        {"/_observer", Observer.view(%{})}
+    ])
 }

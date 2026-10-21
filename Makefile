@@ -1,12 +1,12 @@
 # swarm-live — LiveView framework + swarmUI for swarmrt
 # Requires sibling ../swarmrt with bin/swc + bin/libswarmrt.a built.
 
-SWC := ../swarmrt/bin/swc
+SWC ?= ../swarmrt/bin/swc
 
-EXAMPLES := counter todo router chat feed showcase canvas arena flock
+EXAMPLES := counter todo router chat feed showcase canvas arena flock observer_demo
 BINS := $(addprefix bin/,$(EXAMPLES))
 
-LIB_SOURCES := src/liveview.sw src/ui.sw src/client.sw src/ArenaJs.sw src/FlockJs.sw
+LIB_SOURCES := src/LiveView.sw src/UI.sw src/Client.sw src/ArenaJs.sw src/FlockJs.sw src/ObserverJs.sw src/Observer.sw
 
 .PHONY: all clean run-%
 

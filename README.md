@@ -17,9 +17,9 @@ make            # builds bin/counter ... bin/showcase
 ## Files
 
 ```
-src/liveview.sw   the framework (start/serve/session, h template, diff, PubSub, presence, streams)
-src/ui.sw         swarmUI — 14 shadcn-flavoured components + UI.css() design system
-src/client.sw     embedded browser client (diff protocol, morphdom, bindings, JS commands)
+src/LiveView.sw   the framework (start/serve/session, h template, diff, PubSub, presence, streams)
+src/UI.sw         swarmUI — 14 shadcn-flavoured components + UI.css() design system
+src/Client.sw     embedded browser client (diff protocol, morphdom, bindings, JS commands)
 src/counter.sw    :4000  diff-protocol counter (the tracer bullet)
 src/todo.sw       :4001  list components, sw-submit form data, live validation
 src/router.sw     :4002  routes + :params + sw-link live navigation
@@ -29,10 +29,16 @@ src/showcase.sw   :4005  every UI component on one live page
 src/canvas.sw     :4006  shared multiplayer canvas — ink, live cursors, presence, history
 src/arena.sw      :4007  Swarm Arena — 600 supervised processes on a canvas: real message comets, kills, supervisor respawns (add ?slow=8 for slow-mo)
 src/flock.sw      :4008  Flock — 800 boids, each a swarmrt process; every visitor is a predator (hold to attract); live flock-order metric
-src/arena.js      the Arena's canvas renderer; src/ArenaJs.sw is generated from it (python3 scripts/embed_js.py src/arena.js ArenaJs src/ArenaJs.sw); same for src/flock.js -> src/FlockJs.sw
+src/Observer.sw   Swarm Observer — a live X-ray of the swarmrt node it runs in (process map by supervisor, backlog / busiest / biggest, scheduler load, activity feed); `Observer.view(opts)` mounts in any app
+src/observer_demo.sw :4009  a node with a pipeline (slow stage backs up), crash loops, gossip and memory hogs to look at; Flock also mounts it at :4008/_observer
+src/arena.js      the Arena's canvas renderer; src/ArenaJs.sw is generated from it (python3 scripts/embed_js.py src/arena.js ArenaJs src/ArenaJs.sw); same for src/flock.js -> src/FlockJs.sw and src/observer.js -> src/ObserverJs.sw
 ```
 
 > **Run demos with `make run-flock` (or `scripts/run.sh <name>`), not the bare binary.** It sets `SW_SCHEDULERS=4` and ignores SIGPIPE. Status of the swarmrt issues behind that, verified against `main` @ ae943e8: [#20](https://github.com/skyblanket/swarmrt/issues/20) (SIGPIPE kills the node when a client disconnects mid-send) and [#22](https://github.com/skyblanket/swarmrt/issues/22) (mutual tail calls overflow the stack) are **fixed**, so the SIGPIPE guard only matters on older swarmrt. Still open: [#4](https://github.com/skyblanket/swarmrt/issues/4) (idle schedulers burn CPU; fix PR #76 pending), [#58](https://github.com/skyblanket/swarmrt/issues/58) (one shared ETS table scales backwards across schedulers; Flock shards its state over 16 tables) and [#57](https://github.com/skyblanket/swarmrt/issues/57) (shutdown race).
+
+**Observer in your own app:** `import Observer` then `LiveView.start(4000, [{"/", my_view}, {"/_observer", Observer.view(%{})}])`. It only samples while someone is watching, and is read-only unless you pass `%{kill: 'true'}`.
+
+**Build against a current swarmrt** (`make SWC=/path/to/swarmrt/bin/swc`, default `../swarmrt/bin/swc`). Older runtimes (before `ae943e8`) have a quadratic cost for tail-recursive accumulators (a 160k-element list took 83s), plus the SIGPIPE and mutual-tail-call bugs.
 
 **Per-view scripts:** a view map may set `js:` (a string). It is added to the page after the client and can call `window.swSend(name, value)` (-> `handle_event`) and register `window.SwEvents[name] = fn` for `{t:"ev", n:name, d:data}` frames that the server `ws_send`s. Mark client-owned elements (a canvas, a log) `sw-keep` so DOM patching leaves them alone.
 
