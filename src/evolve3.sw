@@ -835,7 +835,7 @@ fun pred_one(s, pr) {
 }
 
 fun preds_step(s, lst, acc) {
-    if (length(lst) == 0) { p(s, 'preds', acc) }
+    if (length(lst) == 0) { p(s, 'preds', rev(acc, [])) }
     else { r = pred_one(s, hd(lst))  preds_step(elem(r, 0), tl(lst), [elem(r, 1) | acc]) }
 }
 
