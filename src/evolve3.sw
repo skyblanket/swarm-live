@@ -1696,7 +1696,7 @@ fun render(assigns) {
         css() ++
         "<header class=\"nav\"><div class=\"logo\">" ++
         "<svg width=\"20\" height=\"20\" viewBox=\"0 0 10 10\" shape-rendering=\"crispEdges\"><path fill=\"#50e3c2\" d=\"M3 1h4v1h1v1h1v4H8v1H7v1H3V8H2V7H1V3h1V2h1z\"/><path fill=\"#05060a\" d=\"M3 4h1v1H3zM6 4h1v1H6z\"/><path fill=\"#a78bfa\" d=\"M4 6h2v1H4z\"/></svg>" ++
-        "Evolution 3</div><span class=\"crumb\">four islands of microbes evolving from scratch, no teacher</span>" ++
+        "Evolution 3</div><span class=\"crumb\">an archipelago of microbes evolving from scratch, no teacher</span>" ++
         "<div class=\"pill ml\"><span class=\"dot\"></span><span id=\"o-tps\">0</span> ticks/s &middot; <span id=\"o-procs\">0</span> neuron processes</div>" ++
         "<div class=\"pill\" id=\"o-ck\">checkpoint &ndash;</div></header>" ++
         "<div class=\"main\">" ++
