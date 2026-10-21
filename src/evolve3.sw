@@ -32,25 +32,29 @@ import Evolve3Js
 import Math
 import Std
 
-let max_slots = 80
-let isl_cap = 50
+let max_slots = 400
+let isl_cap = 400
 let WS = 1.6
 let k_lin = 500000000
 let k_dead = 2000000000
 let k_isl = 300000
-let nmax = 24
+let nmax = 64
 let n_out = 5
 let n_sens = 22
 let n_loci = 19
-let cmax = 48
+let cmax = 160
 let tick_ms = 25
-let k_act = 100000
-let k_w = 200000
+let k_act = 10000000
+let k_w = 20000000
 let ck_dir = "checkpoints/evolve3"
 
 #           size speed armor attack sight diet  hue    p1   p2   p3   mut  eta  A     B     C     D     m0    fert choosy
 let LO = [0.6, 0.5, 0.0, 0.0, 0.15, 0.0, 0.0, 0.0, 0.0, 0.0, 0.3, 0.0, -1.0, -1.0, -1.0, -0.3, -2.0, 45.0, 0.4]
 let HI = [1.6, 1.8, 1.5, 2.0, 0.5, 1.0, 360.0, 1.0, 1.0, 1.0, 3.0, 0.2, 1.0, 1.0, 1.0, 0.3, 2.0, 95.0, 2.5]
+# LO/HI are only the typical range (for starting values, mutation step size and display). Genes are NOT clamped to it:
+# they can evolve as far as energy costs allow. Only physical floors and the few true fractions are bounded.
+let FLOOR = [0.2, 0.05, 0.0, 0.0, 0.05, 0.0, 0.0, 0.0, 0.0, 0.0, 0.05, 0.0, -50.0, -50.0, -50.0, -50.0, -50.0, 20.0, 0.0]
+let CEIL = [1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1.0, 360.0, 1.0, 1.0, 1.0, 1000.0, 1000.0, 50.0, 50.0, 50.0, 50.0, 50.0, 100.0, 1000.0]
 
 fun num(x) { if (x == nil) { 0 } else { x } }
 fun list_or_empty(x) { if (x == nil) { [] } else { x } }
@@ -132,7 +136,7 @@ fun mut_body(lst, k, r) {
         d = hd(tl(hd(lst)))
         span = hi(k) - lo(k)
         v2 = if (rndf() < 0.004 * r) { lo(k) + rndf() * span }
-             else { if (rndf() < 0.10 * r) { if (k == 6) { wrap_hue(v + gauss() * 0.07 * span) } else { clampf(v + gauss() * 0.07 * span, lo(k), hi(k)) } } else { v } }
+             else { if (rndf() < 0.10 * r) { if (k == 6) { wrap_hue(v + gauss() * 0.07 * span) } else { clampf(v + gauss() * 0.07 * span, nth(FLOOR, k), nth(CEIL, k)) } } else { v } }
         d2 = if (rndf() < 0.03 * r) { clampf(d + gauss() * 0.25, 0.05, 1.0) } else { d }
         [[v2, d2] | mut_body(tl(lst), k + 1, r)]
     }
@@ -616,7 +620,8 @@ fun poison_pos(i) {
 fun init_poison(i, k) { ipo_acc(i, k, []) }
 fun ipo_acc(i, k, acc) { if (k <= 0) { acc } else { ipo_acc(i, k - 1, [poison_pos(i) | acc]) } }
 
-fun slots(k, hi) { if (k >= hi) { [] } else { [k | slots(k + 1, hi)] } }
+fun slots(k, hi) { rev(slots_acc(k, hi, []), []) }
+fun slots_acc(k, hi, acc) { if (k >= hi) { acc } else { slots_acc(k + 1, hi, [k | acc]) } }
 
 # four islands, four climates: same rocks and vents, different food, poison and vent strength
 fun isl_plants(i) { nth([150, 150, 95, 210, 160, 150, 115, 150], env(i)) }
@@ -669,6 +674,70 @@ fun nearest_meat(lst, x, y, best) {
 # one pass over the other creatures: nearest one, and the mean signal heard nearby
 # a compact tuple per creature, built once per tick, so the pairwise scans read tuple fields
 # instead of looking keys up in each creature's map
+fun cellc(v) { k = to_int(v / 0.2)  if (k < 0) { 0 } else { if (k > 7) { 7 } else { k } } }
+fun gbuild(lst, m) {
+    if (length(lst) == 0) { m }
+    else { t = hd(lst)  k = cellc(elem(t, 1)) * 8 + cellc(elem(t, 0))  gbuild(tl(lst), map_put(m, k, [t | list_or_empty(map_get(m, k))])) }
+}
+fun ring(r) { if (r == 0) { [{0, 0}] } else { ring_acc(r, 0 - r, []) } }
+fun ring_acc(r, dx, acc) {
+    if (dx > r) { acc }
+    else { ring_acc(r, dx + 1, if (dx == 0 - r || dx == r) { col_all(dx, 0 - r, r, acc) } else { [{dx, 0 - r}, {dx, r} | acc] }) }
+}
+fun col_all(dx, dy, r, acc) { if (dy > r) { acc } else { col_all(dx, dy + 1, r, [{dx, dy} | acc]) } }
+# nearest item passing okf, searching outwards ring by ring; stops once nothing closer can exist or beyond maxd
+fun ng(grid, cx, cy, x, y, r, maxd, best, okf) {
+    lim = to_float(r - 1) * 0.2
+    if (r > 8 || lim > maxd || (best != nil && Math.sqrt(elem(best, 0)) <= lim)) { best }
+    else { ng(grid, cx, cy, x, y, r + 1, maxd, ng_cells(grid, ring(r), cx, cy, x, y, best, okf), okf) }
+}
+fun ng_cells(grid, offs, cx, cy, x, y, best, okf) {
+    if (length(offs) == 0) { best }
+    else {
+        o = hd(offs)
+        gx = cx + elem(o, 0)
+        gy = cy + elem(o, 1)
+        b2 = if (gx < 0 || gy < 0 || gx > 7 || gy > 7) { best } else { ng_items(list_or_empty(map_get(grid, gy * 8 + gx)), x, y, best, okf) }
+        ng_cells(grid, tl(offs), cx, cy, x, y, b2, okf)
+    }
+}
+fun ng_items(lst, x, y, best, okf) {
+    if (length(lst) == 0) { best }
+    else {
+        t = hd(lst)
+        dx = elem(t, 0) - x
+        dy = elem(t, 1) - y
+        d2 = dx * dx + dy * dy
+        ng_items(tl(lst), x, y, if ((best == nil || d2 < elem(best, 0)) && okf(t, d2)) { {d2, dx, dy, t} } else { best }, okf)
+    }
+}
+# mean signal of others within 0.15 (cells of rings 0 and 1)
+fun sig_near(grid, cx, cy, x, y, id) {
+    r = sig_cells(grid, app(ring(0), ring(1)), cx, cy, x, y, id, 0.0, 0)
+    if (elem(r, 1) > 0) { elem(r, 0) / to_float(elem(r, 1)) } else { 0.0 }
+}
+fun sig_cells(grid, offs, cx, cy, x, y, id, sum, cnt) {
+    if (length(offs) == 0) { {sum, cnt} }
+    else {
+        o = hd(offs)
+        gx = cx + elem(o, 0)
+        gy = cy + elem(o, 1)
+        r = if (gx < 0 || gy < 0 || gx > 7 || gy > 7) { {sum, cnt} } else { sig_items(list_or_empty(map_get(grid, gy * 8 + gx)), x, y, id, sum, cnt) }
+        sig_cells(grid, tl(offs), cx, cy, x, y, id, elem(r, 0), elem(r, 1))
+    }
+}
+fun sig_items(lst, x, y, id, sum, cnt) {
+    if (length(lst) == 0) { {sum, cnt} }
+    else {
+        t = hd(lst)
+        dx = elem(t, 0) - x
+        dy = elem(t, 1) - y
+        near = elem(t, 2) != id && dx * dx + dy * dy < 0.0225
+        sig_items(tl(lst), x, y, id, if (near) { sum + elem(t, 5) } else { sum }, if (near) { cnt + 1 } else { cnt })
+    }
+}
+fun plant_tuples(lst, acc) { if (length(lst) == 0) { acc } else { it = hd(lst)  plant_tuples(tl(lst), if (nth(it, 2) > 0) { acc } else { [{hd(it), nth(it, 1)} | acc] }) } }
+
 fun mk_oth(crs, acc) {
     if (length(crs) == 0) { acc }
     else { c = hd(crs)  mk_oth(tl(crs), [{g(c, 'x'), g(c, 'y'), g(c, 'id'), g(c, 'sp'), power(c), g(c, 'sig'), g(c, 'bite'), g(c, 'ph'), in_zone(g(c, 'x'), g(c, 'y'), kelp(g(c, 'isl')))} | acc]) }
@@ -779,24 +848,33 @@ fun senses(s, c) {
     hy = g(c, 'hy')
     ph = g(c, 'ph')
     sight = nth(ph, 4) * (if (env(g(c, 'isl')) == 7) { 0.6 } else { 1.0 })
-    pl = see(nearest_item(g(s, 'plants'), x, y, nil), sight, hx, hy)
+    cg = g(s, 'cg')
+    cx = cellc(x)
+    cy = cellc(y)
+    id = g(c, 'id')
+    spc = g(c, 'sp')
+    mine = power(c)
+    pl = see(unsq(ng(g(s, 'pg'), cx, cy, x, y, 0, sight, nil, fun(t, d2) { true })), sight, hx, hy)
     mt = see(nearest_meat(g(s, 'meat'), x, y, nil), sight, hx, hy)
-    oth = g(s, 'oth')
-    sc = scan_oth(oth, x, y, g(c, 'id'), nil, 0.0, 0)
-    nb = unsq(elem(sc, 0))
+    nb = unsq(ng(cg, cx, cy, x, y, 0, sight, nil, fun(t, d2) { elem(t, 2) != id && (elem(t, 8) == false || d2 < 0.0036) }))
+    heard = sig_near(cg, cx, cy, x, y, id)
     cv = see(nb, sight, hx, hy)
     seen = nb != nil && hd(nb) <= sight
     o = if (nb == nil) { nil } else { nth(nb, 3) }
     kin = if (seen) { fmax(0.0, 1.0 - body_dist(ph, elem(o, 7), 0) / 2.5) } else { 0.0 }
     sz = if (seen) { hd(elem(o, 7)) - hd(ph) } else { 0.0 }
     osig = if (seen) { elem(o, 5) } else { 0.0 }
-    hn = unsq(hunter_oth(oth, x, y, g(c, 'id'), g(c, 'sp'), power(c), nil))
+    # the "stronger stranger" search usually finds nothing and widens over the whole island,
+    # so it refreshes every 4th tick per creature (staggered) and reuses the last reading in between
+    old = g(c, 'sv')
+    fresh_h = old == nil || length(old) < n_sens || (g(s, 'tick') + id) % 4 == 0
+    hn = if (fresh_h) { unsq(ng(cg, cx, cy, x, y, 0, sight * 1.3, nil, fun(t, d2) { elem(t, 2) != id && elem(t, 3) != spc && elem(t, 4) > mine && hd(tl(tl(tl(elem(t, 7))))) >= 0.8 && (elem(t, 8) == false || d2 < 0.0036) })) } else { nil }
     po = see(nearest_poison(g(s, 'poison'), x, y, nil), sight, hx, hy)
-    pv = see(hn, sight * 1.3, hx, hy)
-    threat = if (hn == nil || hd(hn) > sight * 1.3) { 0.0 } else { if (elem(nth(hn, 3), 6) == 1) { 1.0 } else { 0.5 } }
+    pv = if (fresh_h) { see(hn, sight * 1.3, hx, hy) } else { [nth(old, 10), nth(old, 11)] }
+    threat = if (fresh_h == false) { nth(old, 12) } else { if (hn == nil || hd(hn) > sight * 1.3) { 0.0 } else { if (elem(nth(hn, 3), 6) == 1) { 1.0 } else { 0.5 } } }
     wa = 1.0 - fmin(wall_t(x, y, hx, hy), 0.25) / 0.25
     [1.0, hd(pl), nth(pl, 1), hd(mt), nth(mt, 1), hd(cv), nth(cv, 1), kin, sz, osig,
-     hd(pv), nth(pv, 1), threat, wa, g(c, 'e') / 100.0, g(c, 'h') / 100.0, if (g(c, 'pain') > 0) { 1.0 } else { 0.0 }, elem(sc, 1),
+     hd(pv), nth(pv, 1), threat, wa, g(c, 'e') / 100.0, g(c, 'h') / 100.0, if (g(c, 'pain') > 0) { 1.0 } else { 0.0 }, heard,
      hd(po), nth(po, 1), toxicity(x, y, vents(g(c, 'isl'))), toxicity(x + hx * 0.09, y + hy * 0.09, vents(g(c, 'isl')))]
 }
 
@@ -806,6 +884,50 @@ fun senses(s, c) {
 # senses are recomputed every other tick (staggered across creatures); in between only the
 # body senses (energy, health, pain) are refreshed
 fun live_body(sv, c) { set_at(set_at(set_at(sv, 14, g(c, 'e') / 100.0), 15, g(c, 'h') / 100.0), 16, if (g(c, 'pain') > 0) { 1.0 } else { 0.0 }) }
+
+# ---- parallel senses: each tick the island splits its creatures into chunks and spawns a short-lived
+# worker process per chunk. A worker gets a slim view of the world, computes senses, sends each
+# creature's neurons their tick, and returns the senses to the island.
+fun slim(c) {
+    %{id: g(c, 'id'), x: g(c, 'x'), y: g(c, 'y'), hx: g(c, 'hx'), hy: g(c, 'hy'), ph: g(c, 'ph'), sp: g(c, 'sp'), isl: g(c, 'isl'),
+      e: g(c, 'e'), h: g(c, 'h'), pain: g(c, 'pain'), sv: g(c, 'sv'), pids: g(c, 'pids')}
+}
+fun chunks(crs, k, cur, n, acc) {
+    if (length(crs) == 0) { if (length(cur) == 0) { acc } else { [cur | acc] } }
+    else { if (n >= k) { chunks(crs, k, [], 0, [cur | acc]) } else { chunks(tl(crs), k, [slim(hd(crs)) | cur], n + 1, acc) } }
+}
+fun spawn_workers(world, view, lst, plast, n) {
+    if (length(lst) == 0) { n }
+    else { ch = hd(lst)  spawn(sense_worker(world, view, ch, plast))  spawn_workers(world, view, tl(lst), plast, n + 1) }
+}
+fun sense_worker(world, view, ch, plast) { send(world, {'sv', sw_chunk(view, ch, plast, [])}) }
+fun sw_chunk(view, ch, plast, acc) {
+    if (length(ch) == 0) { acc }
+    else {
+        c = hd(ch)
+        old = g(c, 'sv')
+        sv = if ((g(view, 'tick') + g(c, 'id')) % 2 == 1 && old != nil && length(old) == n_sens) { live_body(old, c) } else { senses(view, c) }
+        send_all(g(c, 'pids'), {'tick', sv, plast})
+        sw_chunk(view, tl(ch), plast, [{g(c, 'id'), sv} | acc])
+    }
+}
+fun collect_sv(k, m) {
+    if (k <= 0) { m }
+    else {
+        receive {
+            {'sv', lst} -> collect_sv(k - 1, put_svs(lst, m))
+            after 2000 { m }
+        }
+    }
+}
+fun put_svs(lst, m) { if (length(lst) == 0) { m } else { r = hd(lst)  put_svs(tl(lst), map_put(m, elem(r, 0), elem(r, 1))) } }
+fun apply_svs(crs, m, acc) { if (length(crs) == 0) { acc } else { c = hd(crs)  sv = map_get(m, g(c, 'id'))  apply_svs(tl(crs), m, [if (sv == nil) { c } else { p(c, 'sv', sv) } | acc]) } }
+fun sense_par(world, s, crs, plast) {
+    view = %{cg: g(s, 'cg'), pg: g(s, 'pg'), meat: g(s, 'meat'), poison: g(s, 'poison'), tick: g(s, 'tick')}
+    per = if (length(crs) > 96) { 24 } else { 32 }
+    k = spawn_workers(world, view, chunks(crs, per, [], 0, []), plast, 0)
+    apply_svs(crs, collect_sv(k, %{}), [])
+}
 
 fun sense_all(s, crs, plast, acc) {
     if (length(crs) == 0) { acc }
@@ -881,7 +1003,10 @@ fun flee_pass(tab, isl, all, crs) {
     if (length(crs) == 0) { 'ok' }
     else {
         c = hd(crs)
-        hn = unsq(hunter_oth(all, g(c, 'x'), g(c, 'y'), g(c, 'id'), g(c, 'sp'), power(c), nil))
+        id = g(c, 'id')
+        spc = g(c, 'sp')
+        mine = power(c)
+        hn = unsq(ng(all, cellc(g(c, 'x')), cellc(g(c, 'y')), g(c, 'x'), g(c, 'y'), 0, nth(g(c, 'ph'), 4) * 1.3, nil, fun(t, d2) { elem(t, 2) != id && elem(t, 3) != spc && elem(t, 4) > mine && hd(tl(tl(tl(elem(t, 7))))) >= 0.8 && (elem(t, 8) == false || d2 < 0.0036) }))
         sight = nth(g(c, 'ph'), 4) * 1.3
         if (hn != nil && hd(hn) < sight && hd(hn) > 0.0001) {
             vmax = 0.011 * nth(g(c, 'ph'), 1) + 0.000001
@@ -987,14 +1112,23 @@ fun upd(crs, id, f) {
     if (length(crs) == 0) { [] } else { if (g(hd(crs), 'id') == id) { [f(hd(crs)) | tl(crs)] } else { [hd(crs) | upd(tl(crs), id, f)] } }
 }
 
-fun fight(crs, snap) {
+fun fight_tuples(crs, acc) { if (length(crs) == 0) { acc } else { c = hd(crs)  fight_tuples(tl(crs), [{g(c, 'x'), g(c, 'y'), g(c, 'id'), g(c, 'sp'), g(c, 'h')} | acc]) } }
+fun in_reach_g(grid, a) {
+    aid = g(a, 'id')
+    asp = g(a, 'sp')
+    reach = 0.035 + 0.014 * nth(g(a, 'ph'), 0)
+    b = ng(grid, cellc(g(a, 'x')), cellc(g(a, 'y')), g(a, 'x'), g(a, 'y'), 0, reach, nil, fun(t, d2) { elem(t, 2) != aid && elem(t, 3) != asp && elem(t, 4) > 0.0 && d2 < reach * reach })
+    if (b == nil) { nil } else { elem(elem(b, 3), 2) }
+}
+fun fight(crs, snap) { fight_g(crs, snap, gbuild(fight_tuples(crs, []), %{})) }
+fun fight_g(crs, snap, grid) {
     if (length(snap) == 0) { crs }
     else {
         a = find_id(crs, g(hd(snap), 'id'))
         if (a != nil && g(a, 'bite') == 1 && g(a, 'acd') <= 0 && g(a, 'h') > 0.0) {
-            tid = in_reach(crs, a, nil)
+            tid = in_reach_g(grid, a)
             aph = g(a, 'ph')
-            if (tid == nil) { fight(upd(crs, g(a, 'id'), fun(c) { p(p(c, 'acd', 6), 'e', g(c, 'e') - 0.15) }), tl(snap)) }
+            if (tid == nil) { fight_g(upd(crs, g(a, 'id'), fun(c) { p(p(c, 'acd', 6), 'e', g(c, 'e') - 0.15) }), tl(snap), grid) }
             else {
                 t = find_id(crs, tid)
                 shelter = if (env(g(t, 'isl')) == 4 && near_coral(g(t, 'x'), g(t, 'y'), obstacles(g(t, 'isl')))) { 0.5 } else { 1.0 }
@@ -1004,9 +1138,9 @@ fun fight(crs, snap) {
                 crs2 = upd(crs, tid, fun(c) { p(p(p(c, 'h', g(c, 'h') - dmg), 'pain', 10), 'killer', aid) })
                 dead = g(t, 'h') - dmg <= 0.0
                 crs3 = upd(crs2, aid, fun(c) { p(p(p(c, 'e', fmin(100.0, g(c, 'e') + gain - 0.3)), 'acd', 12), 'kills', g(c, 'kills') + (if (dead) { 1 } else { 0 })) })
-                fight(crs3, tl(snap))
+                fight_g(crs3, tl(snap), grid)
             }
-        } else { fight(crs, tl(snap)) }
+        } else { fight_g(crs, tl(snap), grid) }
     }
 }
 
@@ -1060,9 +1194,9 @@ fun preds_step(s, lst, acc) {
 fun vitals(c) {
     ph = g(c, 'ph')
     sz = nth(ph, 0)
-    cold = if (env(numf(g(c, 'isl'))) == 6) { 0.035 / sz } else { 0.0 }
+    cold = if (env(numf(g(c, 'isl'))) == 6) { 0.12 / sz } else { 0.0 }
     cost = cold + 0.012 + 0.018 * sz * sz + 0.0016 * to_float(g(c, 'nn')) + 0.0004 * to_float(g(c, 'nc')) +
-           0.006 * nth(ph, 2) + 0.005 * nth(ph, 3) + 0.02 * nth(ph, 4) + 0.03 * nth(ph, 11)
+           0.006 * nth(ph, 2) + 0.004 * nth(ph, 3) * nth(ph, 3) + 0.02 * nth(ph, 4) + 0.03 * nth(ph, 4) * nth(ph, 4) + 0.03 * nth(ph, 11)
     tox = toxicity(g(c, 'x'), g(c, 'y'), vents(g(c, 'isl')))
     regen = g(c, 'e') > 40.0 && g(c, 'h') < 100.0 && tox == 0.0
     c0 = if (tox > 0.0) { p(p(p(c, 'h', g(c, 'h') - 1.2 * tox * numf(g(c, 'vk'))), 'pain', 6), 'killer', 0 - 2) } else { c }
@@ -1119,7 +1253,7 @@ fun hof_ins(h, e) { if (length(h) == 0) { [e] } else { if (hd(e) >= hd(hd(h))) {
 # ---- birth ----
 fun birth(tab, world, s, ha, hb, gen, sp, x, y, e, mom, dad, kind) {
     fr = g(s, 'free')
-    if (length(fr) == 0 || length(g(s, 'crs')) >= g(s, 'cap')) { s }
+    if (length(fr) == 0 || length(g(s, 'crs')) >= g(s, 'cap') || num(cget(tab, 'procs')) > 88000) { s }
     else {
         c = make_creature(tab, world, s, ha, hb, hd(fr), gen, sp, x, y, e, mom, dad)
         lin_put(tab, c, s, kind)
@@ -1172,6 +1306,35 @@ fun ped(tab, id, depth, pos, maxd) {
 
 fun eligible(c) { g(c, 'mate') == 1 && g(c, 'e') >= nth(g(c, 'ph'), 17) && g(c, 'age') >= 150 && g(c, 'cool') <= 0 }
 
+fun mate_tuples(crs, acc) { if (length(crs) == 0) { acc } else { c = hd(crs)  mate_tuples(tl(crs), if (eligible(c)) { [{g(c, 'x'), g(c, 'y'), g(c, 'id')} | acc] } else { acc }) } }
+fun find_mate_in(crs, c, grid) {
+    cands = ng_all(grid, cellc(g(c, 'x')), cellc(g(c, 'y')), g(c, 'x'), g(c, 'y'), g(c, 'id'), [])
+    find_mate(cands_creatures(crs, cands, []), c, nil)
+}
+fun find_mate_g(crs, c) {
+    cid = g(c, 'id')
+    grid = gbuild(mate_tuples(crs, []), %{})
+    cands = ng_all(grid, cellc(g(c, 'x')), cellc(g(c, 'y')), g(c, 'x'), g(c, 'y'), cid, [])
+    find_mate(cands_creatures(crs, cands, []), c, nil)
+}
+# every eligible creature within 0.06 (one ring of cells covers it)
+fun ng_all(grid, cx, cy, x, y, cid, acc) { na_cells(grid, app(ring(0), ring(1)), cx, cy, x, y, cid, acc) }
+fun na_cells(grid, offs, cx, cy, x, y, cid, acc) {
+    if (length(offs) == 0) { acc }
+    else {
+        o = hd(offs)
+        gx = cx + elem(o, 0)
+        gy = cy + elem(o, 1)
+        a2 = if (gx < 0 || gy < 0 || gx > 7 || gy > 7) { acc } else { na_items(list_or_empty(map_get(grid, gy * 8 + gx)), x, y, cid, acc) }
+        na_cells(grid, tl(offs), cx, cy, x, y, cid, a2)
+    }
+}
+fun na_items(lst, x, y, cid, acc) {
+    if (length(lst) == 0) { acc }
+    else { t = hd(lst)  dx = elem(t, 0) - x  dy = elem(t, 1) - y  na_items(tl(lst), x, y, cid, if (elem(t, 2) != cid && dx * dx + dy * dy < 0.0036) { [elem(t, 2) | acc] } else { acc }) }
+}
+fun cands_creatures(crs, ids, acc) { if (length(ids) == 0) { acc } else { o = find_id(crs, hd(ids))  cands_creatures(crs, tl(ids), if (o == nil) { acc } else { [o | acc] }) } }
+
 fun find_mate(crs, c, best) {
     if (length(crs) == 0) { best }
     else {
@@ -1187,13 +1350,15 @@ fun find_mate(crs, c, best) {
 
 fun pay_old(crs, id, cost, kid) { upd(crs, id, fun(c) { p(p(p(c, 'e', g(c, 'e') - cost), 'cool', 220), 'kids', g(c, 'kids') + kid) }) }
 
-fun breed(tab, world, s, ids) {
+# the grid of eligible mates is built once per tick
+fun breed(tab, world, s, ids) { breed_g(tab, world, s, ids, gbuild(mate_tuples(g(s, 'crs'), []), %{})) }
+fun breed_g(tab, world, s, ids, mgrid) {
     if (length(ids) == 0 || length(g(s, 'crs')) >= g(s, 'cap')) { s }
     else {
         c = find_id(g(s, 'crs'), hd(ids))
-        if (c == nil || g(c, 'cool') > 0) { breed(tab, world, s, tl(ids)) }
+        if (c == nil || g(c, 'cool') > 0) { breed_g(tab, world, s, tl(ids), mgrid) }
         else {
-            m = if (eligible(c)) { find_mate(g(s, 'crs'), c, nil) } else { nil }
+            m = if (eligible(c)) { find_mate_in(g(s, 'crs'), c, mgrid) } else { nil }
             if (m != nil) {
                 o = elem(m, 1)
                 ga = gamete(g(c, 'ha'), g(c, 'hb'), nth(g(c, 'ph'), 10))
@@ -1202,14 +1367,14 @@ fun breed(tab, world, s, ids) {
                 s1 = birth(tab, world, s, ga, gb, gen, g(c, 'sp'), clampw(g(c, 'x') + gauss() * 0.02), clampw(g(c, 'y') + gauss() * 0.02), 40.0, g(c, 'id'), g(o, 'id'), 1)
                 born = length(g(s1, 'crs')) > length(g(s, 'crs'))
                 s2 = if (born) { p(s1, 'crs', pay(pay(g(s1, 'crs'), g(c, 'id'), 18.0, 1), g(o, 'id'), 18.0, 1)) } else { s1 }
-                breed(tab, world, s2, tl(ids))
+                breed_g(tab, world, s2, tl(ids), mgrid)
             } else { if (g(c, 'e') >= 97.0 && g(c, 'age') >= 600) {
                 ga = gamete(g(c, 'ha'), g(c, 'hb'), nth(g(c, 'ph'), 10))
                 gb = gamete(g(c, 'ha'), g(c, 'hb'), nth(g(c, 'ph'), 10))
                 s1 = birth(tab, world, s, ga, gb, g(c, 'gen') + 1, g(c, 'sp'), clampw(g(c, 'x') + gauss() * 0.02), clampw(g(c, 'y') + gauss() * 0.02), 35.0, g(c, 'id'), g(c, 'id'), 2)
                 born = length(g(s1, 'crs')) > length(g(s, 'crs'))
-                breed(tab, world, if (born) { p(s1, 'crs', pay(g(s1, 'crs'), g(c, 'id'), 60.0, 1)) } else { s1 }, tl(ids))
-            } else { breed(tab, world, s, tl(ids)) } }
+                breed_g(tab, world, if (born) { p(s1, 'crs', pay(g(s1, 'crs'), g(c, 'id'), 60.0, 1)) } else { s1 }, tl(ids), mgrid)
+            } else { breed_g(tab, world, s, tl(ids), mgrid) } }
         }
     }
 }
@@ -1485,11 +1650,12 @@ fun step(tab, s0x) {
     plast = num(cget(tab, 'plast'))
     s0 = p(s, 'pred_on', num(cget(tab, 'pred_on')))
     drain_acks()
-    s0o = p(s0, 'oth', mk_oth(g(s0, 'crs'), []))
-    crs0 = sense_all(s0o, g(s0, 'crs'), plast, [])
+    oth = mk_oth(g(s0, 'crs'), [])
+    s0o = p(p(p(s0, 'oth', oth), 'cg', gbuild(oth, %{})), 'pg', gbuild(plant_tuples(g(s0, 'plants'), []), %{}))
+    crs0 = sense_par(self(), s0o, g(s0, 'crs'), plast)
     left = wait_acks(count_neurons(crs0, 0), 0)
     crs1 = act_all(tab, crs0, [])
-    if (g(s, 'tick') % 4 == 0) { flee_pass(tab, isl, mk_oth(crs1, []), crs1) } else { 'x' }
+    if (g(s, 'tick') % 16 == 0) { flee_pass(tab, isl, gbuild(mk_oth(crs1, []), %{}), crs1) } else { 'x' }
     s1 = feed_all(p(s0, 'crs', []), crs1, [])
     crs2 = fight(g(s1, 'crs'), g(s1, 'crs'))
     s2 = p(s1, 'crs', crs2)
@@ -1505,6 +1671,7 @@ fun step(tab, s0x) {
     s6a = if (tick % 40 == 0) { species_step(s5) } else { s5 }
     s6 = if (tick % 500 == 0) { p(p(s6a, 'hist', cap([app(hist_sample(s6a, tick), flee_sample(tab, s6a)) | g(s6a, 'hist')], 400)), 'eaten_mark', g(s6a, 'd_eaten')) } else { s6a }
     s7 = if (tick - g(s6, 'ck_tick') >= 4000) { save(s6, ck_name(isl)) } else { s6 }
+    if (tick % 20 == 0 && isl == 0) { cput(tab, 'procs', num(map_get(swarm_stats(), 'processes'))) } else { 'x' }
     if (tick % 20 == 0) { cput(tab, k_isl + 400 + isl, [isl, length(g(s7, 'crs')), nsp_alive(s7), g(s7, 'maxgen'), tick, g(s7, 'mig_in'), g(s7, 'mig_out'), forage_of(g(s7, 'crs'))]) } else { 'x' }
     every = 1
     # every viewer sends a heartbeat for the island it watches; an island streams full frames while anyone watches it

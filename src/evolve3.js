@@ -209,13 +209,13 @@
        grey plates: armor     spikes: attack (red if it eats meat)     eye: sight     nucleus: brain size
        cilia (slow bodies) or a whip tail (fast bodies, drawn live)    the sprite faces +x */
   function spriteKey(c) {
-    return [Math.round(c[10] / 8), Math.round(c[11] / 25), Math.round(c[12] / 25), Math.round(c[13] / 25), Math.round(c[14] / 8), Math.round(c[15] / 34),
+    return [Math.min(60, Math.round(c[10] / 8)), Math.round(c[11] / 25), Math.round(c[12] / 25), Math.round(c[13] / 25), Math.round(c[14] / 8), Math.round(c[15] / 34),
       Math.round(c[16] / 10), Math.round(c[17] / 10), Math.round(c[18] / 10), Math.round(c[3] / 12), Math.min(4, Math.floor(c[26] / 5))].join('.');
   }
   function buildSprite(c) {
     var size = c[10] / 100, speed = c[11] / 100, armor = c[12] / 100, attack = c[13] / 100, sight = c[14] / 100, diet = c[15] / 100;
     var p1 = c[16] / 100, p2 = c[17] / 100, p3 = c[18] / 100, hue = c[3], nn = c[26];
-    var n = 9 + 2 * Math.round((size - 0.6) * 3), W = n + 8, H = n + 6;
+    var n = Math.min(41, Math.max(5, 9 + 2 * Math.round((size - 0.6) * 3))), W = n + 8, H = n + 6;   /* genes are unbounded now; sprites stop growing at 41 px */
     var cx = W / 2 - 1, cy = H / 2, rx = n / 2 * (0.9 + 0.25 * (speed - 0.5)), ry = n / 2 * (0.95 - 0.15 * (speed - 0.5));
     var seed = Math.round(p1 * 10) * 131 + Math.round(p2 * 10) * 17 + Math.round(p3 * 10);
     var lite = hsl(hue, 70, 64), body = hsl(hue, 58, 47), deep = hsl(hue, 62, 34), memb = hsl(hue, 70, 18);
@@ -255,9 +255,9 @@
         var ddx = x + 0.5 - ncx, ddy = y + 0.5 - cy;
         if (ddx * ddx + ddy * ddy <= nr * nr && inside(x, y)) px(x, y, ddx < 0 && ddy < 0 ? hsl(hue + 180, 30, 34) : hsl(hue + 180, 35, 20));
       }
-      var ns = Math.round(attack * 2.2), spk = diet > 0.5 ? '#ff4b3a' : '#e8ecf2', tip = diet > 0.5 ? '#ffb199' : '#ffffff', fx = Math.round(cx + rx);
+      var ns = Math.min(9, Math.round(attack * 2.2)), spk = diet > 0.5 ? '#ff4b3a' : '#e8ecf2', tip = diet > 0.5 ? '#ffb199' : '#ffffff', fx = Math.round(cx + rx);
       for (k = 0; k < ns; k++) {
-        var sy = Math.round(cy + (k - (ns - 1) / 2) * 2.2), len = 1 + Math.round(attack * 1.2) - (Math.abs(k - (ns - 1) / 2) > 1 ? 1 : 0) + (f && k % 2 ? 1 : 0);
+        var sy = Math.round(cy + (k - (ns - 1) / 2) * 2.2), len = 1 + Math.min(6, Math.round(attack * 1.2)) - (Math.abs(k - (ns - 1) / 2) > 1 ? 1 : 0) + (f && k % 2 ? 1 : 0);
         for (var j = 0; j < len; j++) px(fx + j, sy, j === len - 1 ? tip : spk);
       }
       var ex = Math.round(cx + rx * 0.42), ey = Math.round(cy - ry * 0.38);
