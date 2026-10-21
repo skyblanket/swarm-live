@@ -1385,7 +1385,9 @@ fun step(tab, s0x) {
     s4a = breed(tab, self(), s3, ids_of(g(s3, 'crs')))
     tick = g(s4a, 'tick') + 1
     s4 = emigrate(tab, s4a, tick)
-    s5 = if (length(g(s4, 'crs')) < 20 && tick % 30 == 0) { immigrate(tab, self(), s4) } else { s4 }
+    # the Toxic Marsh (island 1) gets no random immigrants: only real migrants from the other islands,
+    # so whatever lives there has to adapt to the vents itself
+    s5 = if (length(g(s4, 'crs')) < 20 && tick % 30 == 0 && g(s4, 'isl') != 1) { immigrate(tab, self(), s4) } else { s4 }
     s6a = if (tick % 40 == 0) { species_step(s5) } else { s5 }
     s6 = if (tick % 500 == 0) { p(p(s6a, 'hist', cap([app(hist_sample(s6a, tick), flee_sample(tab, s6a)) | g(s6a, 'hist')], 400)), 'eaten_mark', g(s6a, 'd_eaten')) } else { s6a }
     s7 = if (tick - g(s6, 'ck_tick') >= 4000) { save(s6, ck_name(isl)) } else { s6 }
