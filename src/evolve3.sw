@@ -34,10 +34,9 @@ import Std
 
 let max_slots = 80
 let isl_cap = 50
-let n_isl = 4
 let WS = 1.6
 let k_lin = 500000000
-let k_dead = 700000000
+let k_dead = 2000000000
 let k_isl = 300000
 let nmax = 24
 let n_out = 5
@@ -494,7 +493,8 @@ fun founder_genome() {
 #   1 Toxic Marsh     six big vents, a few rocks, four meadows squeezed between the vents
 #   2 Lean Waters     a maze of twelve boulders, one vent, three small meadows far apart
 #   3 Rich Shallows   open water, one tiny vent, eight meadows close together
-fun obstacles(i) {
+fun obstacles(i) { obst_c(i % 4) }
+fun obst_c(i) {
     if (i == 0) { [[1.20, 1.18, 0.07], [1.33, 1.28, 0.06], [1.17, 1.36, 0.05], [1.40, 1.12, 0.045], [1.29, 1.44, 0.045], [0.40, 0.45, 0.06], [1.10, 0.38, 0.05], [0.30, 1.30, 0.05]] }
     else { if (i == 1) { [[0.80, 0.22, 0.05], [1.45, 0.80, 0.05], [0.15, 0.80, 0.05]] }
     else { if (i == 2) { [[0.30, 0.30, 0.08], [0.80, 0.22, 0.07], [1.30, 0.30, 0.08], [0.22, 0.80, 0.07], [1.38, 0.80, 0.07], [0.30, 1.30, 0.08],
@@ -503,15 +503,16 @@ fun obstacles(i) {
 }
 
 # toxic vents: standing in one burns health
-fun vents(i) {
+fun vents(i) { vents_c(i % 4) }
+fun vents_c(i) {
     if (i == 0) { [[0.80, 0.80, 0.12], [1.36, 0.26, 0.10], [0.20, 0.62, 0.09]] }
     else { if (i == 1) { [[0.40, 0.40, 0.13], [1.20, 0.38, 0.12], [0.80, 0.80, 0.14], [0.38, 1.20, 0.12], [1.22, 1.22, 0.13], [0.80, 1.47, 0.08]] }
     else { if (i == 2) { [[0.80, 0.80, 0.07]] }
     else { [[1.42, 1.42, 0.05]] } } }
 }
 
-fun meadow_count(i) { nth([6, 4, 3, 8], i) }
-fun meadow_ring(i) { nth([0.31, 0.27, 0.38, 0.24], i) }
+fun meadow_count(i) { nth([6, 4, 3, 8], i % 4) }
+fun meadow_ring(i) { nth([0.31, 0.27, 0.38, 0.24], i % 4) }
 
 fun toxicity(x, y, lst) {
     if (length(lst) == 0) { 0.0 }
@@ -572,9 +573,11 @@ fun ipo_acc(i, k, acc) { if (k <= 0) { acc } else { ipo_acc(i, k - 1, [poison_po
 fun slots(k, hi) { if (k >= hi) { [] } else { [k | slots(k + 1, hi)] } }
 
 # four islands, four climates: same rocks and vents, different food, poison and vent strength
-fun isl_plants(i) { nth([150, 150, 95, 210], i) }
-fun isl_poison(i) { nth([30, 75, 20, 30], i) }
-fun isl_vk(i) { nth([1.0, 2.2, 1.0, 1.0], i) }
+# islands repeat the four climates: island i has climate i % 4
+fun isl_plants(i) { nth([150, 150, 95, 210], i % 4) }
+fun isl_poison(i) { nth([30, 75, 20, 30], i % 4) }
+fun isl_vk(i) { nth([1.0, 2.2, 1.0, 1.0], i % 4) }
+fun nisl(tab) { num(cget(tab, 'n_isl')) }
 
 fun new_world(isl) {
     %{crs: [], plants: init_plants(isl, isl_plants(isl), 0), meat: [], poison: init_poison(isl, isl_poison(isl)),
@@ -1358,7 +1361,9 @@ fun world_loop(tab, s) {
     if (g(s, 'init') == 0) {
         cput(tab, k_isl + 300 + isl, self())
         own = ck_dir ++ "/" ++ ck_name(isl)
-        s1 = if (file_exists(own) == 'true') { load(tab, self(), s, ck_name(isl)) } else { load(tab, self(), s, "latest.json") }
+        seed = ck_dir ++ "/" ++ ck_name(isl % 4)
+        s1 = if (file_exists(own) == 'true') { load(tab, self(), s, ck_name(isl)) }
+             else { if (file_exists(seed) == 'true') { load(tab, self(), s, ck_name(isl % 4)) } else { load(tab, self(), s, "latest.json") } }
         s2 = if (length(g(s1, 'crs')) == 0) { founders(tab, self(), p(s1, 'init', 1), 50) } else { s1 }
         drain_acks()
         world_loop(tab, p(s2, 'init', 1))
@@ -1393,15 +1398,16 @@ fun emigrate(tab, s, tick) {
     isl = g(s, 'isl')
     crs = g(s, 'crs')
     # while the Toxic Marsh is nearly empty, the other islands send it colonists four times as often
-    marsh = cget(tab, k_isl + 400 + 1)
-    marsh_low = isl != 1 && marsh != nil && nth(marsh, 1) < 10
+    target = isl - isl % 4 + 1
+    marsh = cget(tab, k_isl + 400 + target)
+    marsh_low = isl % 4 != 1 && target < nisl(tab) && marsh != nil && nth(marsh, 1) < 10
     normal = tick % 700 == (isl * 175) % 700 && rndf() < 0.7
     rescue = marsh_low && tick % 175 == (isl * 43) % 175
     due = (normal || rescue) && length(crs) > 20
     if (due == false) { s }
     else {
         c = nth(crs, rndi(length(crs)))
-        dest = if (rescue) { 1 } else { (isl + 1 + rndi(n_isl - 1)) % n_isl }
+        dest = if (rescue) { target } else { (isl + 1 + rndi(nisl(tab) - 1)) % nisl(tab) }
         pid = cget(tab, k_isl + 300 + dest)
         if (pid == nil || g(c, 'age') < 300) { s }
         else {
@@ -1442,7 +1448,7 @@ fun step(tab, s0x) {
     s4 = emigrate(tab, s4a, tick)
     # the Toxic Marsh (island 1) gets no random immigrants: only real migrants from the other islands,
     # so whatever lives there has to adapt to the vents itself
-    s5 = if (length(g(s4, 'crs')) < 20 && tick % 30 == 0 && g(s4, 'isl') != 1) { immigrate(tab, self(), s4) } else { s4 }
+    s5 = if (length(g(s4, 'crs')) < 20 && tick % 30 == 0 && g(s4, 'isl') % 4 != 1) { immigrate(tab, self(), s4) } else { s4 }
     s6a = if (tick % 40 == 0) { species_step(s5) } else { s5 }
     s6 = if (tick % 500 == 0) { p(p(s6a, 'hist', cap([app(hist_sample(s6a, tick), flee_sample(tab, s6a)) | g(s6a, 'hist')], 400)), 'eaten_mark', g(s6a, 'd_eaten')) } else { s6a }
     s7 = if (tick - g(s6, 'ck_tick') >= 4000) { save(s6, ck_name(isl)) } else { s6 }
@@ -1485,7 +1491,7 @@ fun pred_pts(lst) { if (length(lst) == 0) { [] } else { pr = hd(lst)  [[r3(hd(pr
 fun pois_pts(lst) { rev(po_acc(lst, []), []) }
 fun po_acc(lst, acc) { if (length(lst) == 0) { acc } else { it = hd(lst)  po_acc(tl(lst), [[r3(hd(it) / WS), r3(nth(it, 1) / WS)] | acc]) } }
 fun meadows(i, k, t) { if (k >= meadow_count(i)) { [] } else { c = patch_center(i, k, t)  [[r3(elem(c, 0) / WS), r3(elem(c, 1) / WS), r3(0.17 / WS)] | meadows(i, k + 1, t)] } }
-fun maps(k) { if (k >= n_isl) { [] } else { [[obst_pts(obstacles(k)), obst_pts(vents(k))] | maps(k + 1)] } }
+fun maps(k) { if (k >= 4) { [] } else { [[obst_pts(obstacles(k)), obst_pts(vents(k))] | maps(k + 1)] } }
 
 fun obst_pts(lst) { if (length(lst) == 0) { [] } else { o = hd(lst)  [[r3(hd(o) / WS), r3(nth(o, 1) / WS), r3(nth(o, 2) / WS)] | obst_pts(tl(lst))] } }
 
@@ -1546,7 +1552,7 @@ fun edges_of(innate, cur, dst) {
     else { e = hd(innate)  [[hd(e), dst, nth(e, 1), r2(nth(e, 2)), r2(nth(hd(cur), 2))] | edges_of(tl(innate), tl(cur), dst)] }
 }
 
-fun isl_sums(tab, k) { if (k >= n_isl) { [] } else { [list_or_empty(cget(tab, k_isl + 400 + k)) | isl_sums(tab, k + 1)] } }
+fun isl_sums(tab, k) { if (k >= nisl(tab)) { [] } else { [list_or_empty(cget(tab, k_isl + 400 + k)) | isl_sums(tab, k + 1)] } }
 
 fun mini_rows(crs) { if (length(crs) == 0) { [] } else { c = hd(crs)  [[r3(g(c, 'x') / WS), r3(g(c, 'y') / WS), Math.round(nth(g(c, 'ph'), 6))] | mini_rows(tl(crs))] } }
 fun mini(s) {
@@ -1608,7 +1614,7 @@ fun inbox(tab) {
     }
 }
 
-fun cmd_all(tab, c, k) { if (k >= n_isl) { 'ok' } else { cput(tab, k_isl + 200 + k, c)  cmd_all(tab, c, k + 1) } }
+fun cmd_all(tab, c, k) { if (k >= nisl(tab)) { 'ok' } else { cput(tab, k_isl + 200 + k, c)  cmd_all(tab, c, k + 1) } }
 
 fun inbox_send(msg) {
     a = whereis('evolve3_in')
@@ -1668,7 +1674,7 @@ fun css() {
     ".ins{display:grid;grid-template-columns:1fr 1fr;gap:10px}" ++
     ".tile{border:1px solid var(--line);border-radius:11px;padding:11px 12px;background:#0d0d0d}.tile .v{font-size:22px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}.tile .t{font-size:12px;font-weight:600;margin-top:2px}.tile .d{font-size:11.5px;color:var(--mu);margin-top:3px;line-height:1.4}" ++
     ".sm{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}.sm .k{font-size:11.5px;color:var(--mu);display:flex;justify-content:space-between}.sm .k b{color:var(--tx);font-weight:600;font-variant-numeric:tabular-nums}.sm canvas{width:100%;height:46px;display:block;margin-top:4px}" ++
-    ".note{font-size:11px;color:var(--mu2);margin-top:8px}.isls{display:grid;grid-template-columns:1fr 1fr;gap:8px}.it{border:1px solid var(--line);border-radius:11px;padding:8px;cursor:pointer;background:#0b0b0b;transition:border-color .15s,background .15s}.it:hover{border-color:#3a3a3a}.it.on{border-color:#ededed;background:#111}.it canvas{width:100%;height:84px;display:block;border-radius:7px;background:#05070b;image-rendering:pixelated}.it .nm{font-size:12px;font-weight:600;margin-top:6px}.it .st{font-size:11px;color:var(--mu);margin-top:1px}" ++
+    ".note{font-size:11px;color:var(--mu2);margin-top:8px}.isls{display:grid;grid-template-columns:1fr 1fr;gap:8px}.it{border:1px solid var(--line);border-radius:11px;padding:8px;cursor:pointer;background:#0b0b0b;transition:border-color .15s,background .15s}.it:hover{border-color:#3a3a3a}.it.on{border-color:#ededed;background:#111}.it canvas{width:100%;height:84px;display:block;border-radius:7px;background:#05070b;image-rendering:pixelated}.it .nm{font-size:12px;font-weight:600;margin-top:6px}.it .st{font-size:11px;color:var(--mu);margin-top:1px}.isls.many{grid-template-columns:repeat(4,1fr);gap:6px}.isls.many .it{padding:5px;border-radius:9px}.isls.many .it canvas{height:52px}.isls.many .it .nm{font-size:10.5px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.isls.many .it .st{font-size:10px}" ++
     ".spr{display:grid;grid-template-columns:30px 1fr 60px;gap:10px;align-items:center;padding:5px 0;border-top:1px solid #141414;font-size:12px;cursor:pointer}.spr:first-child{border-top:0}.spr:hover{background:#0f0f0f}" ++
     ".spr canvas{width:30px;height:30px;image-rendering:pixelated}.spr .n{font-weight:600}.spr .r{color:var(--mu);font-size:11.5px}.bar{height:5px;border-radius:3px;background:#1a1a1a;overflow:hidden}.bar i{display:block;height:100%;border-radius:3px}" ++
     "#feed{font-size:12px;line-height:1.5;min-height:96px}.ev{display:flex;gap:9px;padding:2px 0;animation:in .3s ease}.ev i{width:7px;height:7px;border-radius:2px;margin-top:6px;flex:none}" ++
@@ -1702,7 +1708,7 @@ fun render(assigns) {
         "<div class=\"tip\" id=\"tip\" sw-keep></div><div class=\"toast\" id=\"toast\" sw-keep></div></div>" ++
         "<div class=\"side\">" ++
         "<div class=\"pg\" id=\"pg-story\">" ++
-        "<div class=\"card\"><h3>Four islands <span>separate worlds, rare migrants between them</span></h3><div class=\"isls\" id=\"isls\" sw-keep></div></div>" ++
+        "<div class=\"card\"><h3>Islands <span>separate worlds, rare migrants between them</span></h3><div class=\"isls\" id=\"isls\" sw-keep></div></div>" ++
         "<div class=\"card\"><h3>What evolution found <span id=\"ins-sub\">on this island</span></h3><div class=\"ins\" id=\"ins\" sw-keep></div></div>" ++
         "<div class=\"card\"><h3>The whole run <span id=\"run-span\">since this world began</span></h3><div class=\"sm\" id=\"sm\" sw-keep></div><div class=\"note\" id=\"run-note\" sw-keep></div></div>" ++
         "<div class=\"card\"><h3>Species alive <span>click one to inspect a member</span></h3><div id=\"spl\" sw-keep></div></div>" ++
@@ -1741,7 +1747,7 @@ fun watch(tab, isl, w) {
     } else { watch(tab, isl, w) }
 }
 
-fun start_islands(tab, k) { if (k >= n_isl) { 'ok' } else { spawn(watchdog(tab, k))  start_islands(tab, k + 1) } }
+fun start_islands(tab, k) { if (k >= nisl(tab)) { 'ok' } else { spawn(watchdog(tab, k))  start_islands(tab, k + 1) } }
 
 fun main() {
     tab = make_tables(ets_new(), 16)
@@ -1749,6 +1755,9 @@ fun main() {
     cput(tab, 'plast', 1)
     cput(tab, 'speed', 2)
     cput(tab, 'sel', 0 - 1)
+    ne = getenv("EVOLVE_ISLANDS")
+    n0 = if (ne == nil || ne == "") { 4 } else { to_int(ne) }
+    cput(tab, 'n_isl', if (n0 < 1) { 1 } else { if (n0 > 48) { 48 } else { n0 } })
     cput(tab, 'view', 0)
     start_islands(tab, 0)
     register('evolve3_in', spawn(inbox(tab)))

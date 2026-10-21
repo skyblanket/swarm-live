@@ -69,7 +69,7 @@ fun js() {
     "    var g = bgc.getContext('2d'), img = g.createImageData(WP, WP), d = img.data, x, y, i;\n" ++
     "    for (y = 0; y < WP; y++) for (x = 0; x < WP; x++) {\n" ++
     "      i = (y * WP + x) * 4;\n" ++
-    "      var n = hash(x, y), v = hash(x >> 4, y >> 4), pal = PAL[view_i], b0 = Math.floor(v * 4), spark = n > 0.996 ? 16 : (view_i === 2 && n > 0.93 ? 5 : 0);\n" ++
+    "      var n = hash(x, y), v = hash(x >> 4, y >> 4), pal = PAL[view_i % 4], b0 = Math.floor(v * 4), spark = n > 0.996 ? 16 : (view_i % 4 === 2 && n > 0.93 ? 5 : 0);\n" ++
     "      d[i] = pal[0] + b0 + spark * 0.6; d[i + 1] = pal[1] + b0 + spark; d[i + 2] = pal[2] + b0 + spark; d[i + 3] = 255;\n" ++
     "    }\n" ++
     "    for (var k = 0; k < (obst || []).length; k++) {\n" ++
@@ -240,14 +240,14 @@ fun js() {
     "  function updateUI(d) {\n" ++
     "    var nsp = d.sps.filter(function (s) { return s[1] > 0; }).length, nnb = d.pop ? d.nn / d.pop : 0;\n" ++
     "    var head = $('head');\n" ++
-    "    if (head) head.innerHTML = '<span class=\"big\">' + ISL[view_i].n + ' &middot; gen ' + fmtc(d.maxgen) + '</span><b>' + d.pop + '</b> alive &middot; <b>' + nsp + '</b> species &middot; <b>' + nnb.toFixed(1) + '</b> neurons per brain &middot; <b>' + (d.mig_in || 0) + '</b> migrants arrived';\n" ++
+    "    if (head) head.innerHTML = '<span class=\"big\">' + islName(view_i) + ' &middot; gen ' + fmtc(d.cr.reduce(function (m, c) { return Math.max(m, c[22]); }, 0)) + '</span><b>' + d.pop + '</b> alive &middot; <b>' + nsp + '</b> species &middot; <b>' + nnb.toFixed(1) + '</b> neurons per brain &middot; <b>' + (d.mig_in || 0) + '</b> migrants arrived';\n" ++
     "    var o = $('o-tps'); if (o) o.textContent = Math.round(tps);\n" ++
     "    var op = $('o-procs'); if (op) op.textContent = fmtc(d.nn);\n" ++
     "    var ck = $('o-ck'); if (ck) { var ago = d.tick - d.ck_tick; ck.textContent = d.ck ? 'saved ' + (tps > 0 ? Math.round(ago / tps) + 's ago' : 'just now') : 'not saved yet'; }\n" ++
     "    var sb = document.querySelectorAll('[data-speed]'); for (var i = 0; i < sb.length; i++) sb[i].classList.toggle('on', Number(sb[i].getAttribute('data-speed')) === Math.max(1, d.speed));\n" ++
     "    tog('b-plast', 'Learning: ', d.plast);\n" ++
     "    insights(d, nnb); runCharts(d, nnb); speciesList(d); islandTiles(); drawTree();\n" ++
-    "    var isub = $('ins-sub'); if (isub) isub.textContent = 'on ' + ISL[view_i].n;\n" ++
+    "    var isub = $('ins-sub'); if (isub) isub.textContent = 'on ' + islName(view_i);\n" ++
     "    if (inspId) inspector(d);\n" ++
     "  }\n" ++
     "  function tog(id, label, on) { var b = $(id); if (b) { b.textContent = label + (on ? 'on' : 'off'); b.classList.toggle('on', !!on); } }\n" ++
@@ -326,8 +326,8 @@ fun js() {
     "    if (code === 9) { txt = 'A new species split off: <b>#' + e[3] + '</b>'; col = hsl(e[2], 70, 55); }\n" ++
     "    else if (code === 10) { txt = 'Species #' + e[3] + ' died out'; col = '#555'; }\n" ++
     "    else if (code === 6) { txt = 'A creature was eaten by another one (generation ' + fmtc(e[3]) + ')'; col = '#ff5a5a'; }\n" ++
-    "    else if (code === 14) { txt = 'A creature swam off to ' + ISL[e[4]].n; col = '#5aa9ff'; }\n" ++
-    "    else if (code === 15) { txt = 'A migrant arrived from ' + ISL[e[4]].n; col = '#5aa9ff'; }\n" ++
+    "    else if (code === 14) { txt = 'A creature swam off to ' + islName(e[4]); col = '#5aa9ff'; }\n" ++
+    "    else if (code === 15) { txt = 'A migrant arrived from ' + islName(e[4]); col = '#5aa9ff'; }\n" ++
     "    else if (code === 13) { txt = 'Killed by toxins (vent or poison algae)'; col = '#b45cf0'; }\n" ++
     "    else if (code === 8 && e[5] >= 3) { txt = 'Died of old age, leaving ' + e[5] + ' children'; col = '#8f8f8f'; }\n" ++
     "    else if (code === 7 && e[4] === 1 && Math.random() < 0.15) { txt = 'Born of two parents, ' + e[5] + ' neurons'; col = '#ff78be'; }\n" ++
@@ -342,19 +342,24 @@ fun js() {
     "  }\n" ++
     "\n" ++
     "  /* ---------- the islands ---------- */\n" ++
+    "  function nIsl() { return isls.length || 4; }\n" ++
+    "  function islName(i) { return ISL[i % 4].n + (nIsl() > 4 ? ' ' + (Math.floor(i / 4) + 1) : ''); }\n" ++
     "  function islandTiles() {\n" ++
     "    var el = $('isls'); if (!el) return;\n" ++
-    "    if (!el.children.length) {\n" ++
-    "      el.innerHTML = ISL.map(function (x, i) { return '<div class=\"it\" data-isl=\"' + i + '\"><canvas id=\"ic' + i + '\" width=\"96\" height=\"96\"></canvas><div class=\"nm\">' + x.n + '</div><div class=\"st\" id=\"is' + i + '\">' + x.d + '</div></div>'; }).join('');\n" ++
+    "    var n = nIsl();\n" ++
+    "    if (el.children.length !== n) {\n" ++
+    "      el.classList.toggle('many', n > 4);\n" ++
+    "      var h = ''; for (var q = 0; q < n; q++) h += '<div class=\"it\" data-isl=\"' + q + '\"><canvas id=\"ic' + q + '\" width=\"96\" height=\"96\"></canvas><div class=\"nm\">' + islName(q) + '</div><div class=\"st\" id=\"is' + q + '\">' + ISL[q % 4].d + '</div></div>';\n" ++
+    "      el.innerHTML = h;\n" ++
     "    }\n" ++
-    "    for (var i = 0; i < ISL.length; i++) {\n" ++
+    "    for (var i = 0; i < n; i++) {\n" ++
     "      var t = el.children[i]; t.classList.toggle('on', i === view_i);\n" ++
     "      var sm = isls[i], st = $('is' + i);\n" ++
-    "      if (st && sm && sm.length) st.innerHTML = sm[1] + ' alive &middot; ' + sm[2] + ' species &middot; gen ' + fmtc(sm[3]);\n" ++
+    "      if (st && sm && sm.length) st.innerHTML = n > 4 ? sm[1] + ' alive &middot; ' + sm[2] + ' sp' : sm[1] + ' alive &middot; ' + sm[2] + ' species';\n" ++
     "      var cv = $('ic' + i); if (!cv) continue;\n" ++
     "      var g = cv.getContext('2d'), W = cv.width, m = minis[i];\n" ++
-    "      var pl = PAL[i]; g.fillStyle = 'rgb(' + (pl[0] + 2) + ',' + (pl[1] + 2) + ',' + (pl[2] + 2) + ')'; g.fillRect(0, 0, W, W);\n" ++
-    "      var mp = maps && maps[i];\n" ++
+    "      var pl = PAL[i % 4]; g.fillStyle = 'rgb(' + (pl[0] + 2) + ',' + (pl[1] + 2) + ',' + (pl[2] + 2) + ')'; g.fillRect(0, 0, W, W);\n" ++
+    "      var mp = maps && maps[i % 4];\n" ++
     "      if (mp) {\n" ++
     "        for (var o = 0; o < mp[0].length; o++) { g.fillStyle = 'rgba(120,128,140,0.7)'; g.beginPath(); g.arc(mp[0][o][0] / 1000 * W, mp[0][o][1] / 1000 * W, mp[0][o][2] / 1000 * W, 0, 6.2832); g.fill(); }\n" ++
     "        for (var v = 0; v < mp[1].length; v++) { g.fillStyle = 'rgba(160,70,210,0.65)'; g.beginPath(); g.arc(mp[1][v][0] / 1000 * W, mp[1][v][1] / 1000 * W, mp[1][v][2] / 1000 * W, 0, 6.2832); g.fill(); }\n" ++
@@ -500,7 +505,7 @@ fun js() {
     "    if (bgc) g.drawImage(bgc, 0, 0); else { g.fillStyle = '#080a10'; g.fillRect(0, 0, WP, WP); }\n" ++
     "    if (!d) return;\n" ++
     "    for (i = 0; i < meadows.length; i++) {\n" ++
-    "      var mr = meadows[i][2] / 1000 * WP, md = disc(mr, MEAD[view_i], 0.55, 'm' + view_i + Math.round(mr));\n" ++
+    "      var mr = meadows[i][2] / 1000 * WP, md = disc(mr, MEAD[view_i % 4], 0.55, 'm' + (view_i % 4) + Math.round(mr));\n" ++
     "      g.drawImage(md, Math.round(meadows[i][0] / 1000 * WP - md.width / 2), Math.round(meadows[i][1] / 1000 * WP - md.height / 2));\n" ++
     "    }\n" ++
     "    for (i = 0; i < vents.length; i++) {\n" ++
@@ -542,7 +547,7 @@ fun js() {
     "    ag.font = '600 10px ui-sans-serif,-apple-system,sans-serif'; ag.textAlign = 'center';\n" ++
     "    for (i = 0; i < vents.length; i++) { ag.fillStyle = 'rgba(214,140,255,0.75)'; ag.fillText('TOXIC VENT', SX(vents[i][0] / 1000), SY(vents[i][1] / 1000) + vents[i][2] / 1000 * view.s + 12); }\n" ++
     "    for (i = 0; i < meadows.length; i++) { ag.fillStyle = 'rgba(110,230,170,0.35)'; ag.fillText('algae meadow', SX(meadows[i][0] / 1000), SY(meadows[i][1] / 1000) - meadows[i][2] / 1000 * view.s - 4); }\n" ++
-    "    ag.fillStyle = 'rgba(190,200,215,0.45)'; if (view_i === 0) ag.fillText('ROCK REEF', SX(1.28 / WS), SY(1.03 / WS)); if (view_i === 2) ag.fillText('BOULDER MAZE', SX(0.5), SY(0.5) + 34);\n" ++
+    "    ag.fillStyle = 'rgba(190,200,215,0.45)'; if (view_i % 4 === 0) ag.fillText('ROCK REEF', SX(1.28 / WS), SY(1.03 / WS)); if (view_i % 4 === 2) ag.fillText('BOULDER MAZE', SX(0.5), SY(0.5) + 34);\n" ++
     "    var k = view.k, i;\n" ++
     "    for (i = 0; i < last.preds.length && i < predPos.length; i++) {\n" ++
     "      var pr = last.preds[i], q = predPos[i], u = clamp((now - q.t) / gap, 0, 1), x = SX(q.x0 + (q.x1 - q.x0) * u), y = SY(q.y0 + (q.y1 - q.y0) * u), mode = pr[2];\n" ++
