@@ -25,7 +25,8 @@
   var bgc = null, last = null, net = null, kar = null, hist = [];
   var tpsT = 0, tpsTick = 0, tps = 0, lastFrameT = 0, gap = 33, uiT = 0, toastT = 0, feedT = {};
   var sprites = {}, spriteN = 0, AW = 0, AH = 0, view = { s: 1, ox: 0, oy: 0, k: 1 };
-  var pos = {}, predPos = [], hover = null, mouse = null, inspId = 0;
+  var pos = {}, predPos = [], hover = null, mouse = null, inspId = 0, view_i = 0, minis = {}, isls = [], sptree = [], ped = null, islT = 0;
+  var ISL = [{ n: 'Green Meadows', d: 'plenty of algae' }, { n: 'Toxic Marsh', d: 'strong vents, lots of poison' }, { n: 'Lean Waters', d: 'scarce food' }, { n: 'Rich Shallows', d: 'abundant food' }];
   var SENS = ['bias', 'plant dir', 'plant near', 'meat dir', 'meat near', 'other dir', 'other near', 'kinship', 'its size', 'its signal',
     'hunter dir', 'hunter near', 'hunter biting', 'wall ahead', 'energy', 'health', 'pain', 'heard', 'poison dir', 'poison near', 'toxic here', 'toxic ahead'];
   var OUTS = ['turn', 'thrust', 'bite', 'signal', 'mate'];
@@ -201,7 +202,12 @@
       if (!q) predPos[i] = { x0: px, y0: py, x1: px, y1: py, t: now };
       else { var u = clamp((now - q.t) / gap, 0, 1); q.x0 = q.x0 + (q.x1 - q.x0) * u; q.y0 = q.y0 + (q.y1 - q.y0) * u; q.x1 = px; q.y1 = py; q.t = now; }
     }
+    if (d.isl !== undefined && d.isl !== view_i) return;
     last = d;
+    minis[d.isl] = { cr: d.cr.map(function (c) { return [c[4], c[5], c[3]]; }), tick: d.tick };
+    if (d.isls) isls = d.isls;
+    if (d.sptree) sptree = d.sptree;
+    if (d.ped) ped = d.ped;
     if (d.net) net = d.net;
     if (d.kar) kar = d.kar;
     if (d.hist) hist = d.hist;
@@ -209,6 +215,7 @@
     for (i = 0; i < d.evs.length; i++) addFeed(d.evs[i], now);
     if (now - uiT > 250) { uiT = now; updateUI(d); }
   };
+  window.SwEvents.mini = function (d) { minis[d.isl] = d; };
   function at(p, now) {
     var u = clamp((now - p.t) / gap, 0, 1), da = p.a1 - p.a0;
     while (da > Math.PI) da -= 6.2832; while (da < -Math.PI) da += 6.2832;
@@ -221,13 +228,14 @@
   function updateUI(d) {
     var nsp = d.sps.filter(function (s) { return s[1] > 0; }).length, nnb = d.pop ? d.nn / d.pop : 0;
     var head = $('head');
-    if (head) head.innerHTML = '<span class="big">Generation ' + fmtc(d.maxgen) + '</span><b>' + d.pop + '</b> alive &middot; <b>' + nsp + '</b> species &middot; <b>' + nnb.toFixed(1) + '</b> neurons per brain';
+    if (head) head.innerHTML = '<span class="big">' + ISL[view_i].n + ' &middot; gen ' + fmtc(d.maxgen) + '</span><b>' + d.pop + '</b> alive &middot; <b>' + nsp + '</b> species &middot; <b>' + nnb.toFixed(1) + '</b> neurons per brain &middot; <b>' + (d.mig_in || 0) + '</b> migrants arrived';
     var o = $('o-tps'); if (o) o.textContent = Math.round(tps);
     var op = $('o-procs'); if (op) op.textContent = fmtc(d.nn);
     var ck = $('o-ck'); if (ck) { var ago = d.tick - d.ck_tick; ck.textContent = d.ck ? 'saved ' + (tps > 0 ? Math.round(ago / tps) + 's ago' : 'just now') : 'not saved yet'; }
     var sb = document.querySelectorAll('[data-speed]'); for (var i = 0; i < sb.length; i++) sb[i].classList.toggle('on', Number(sb[i].getAttribute('data-speed')) === Math.max(1, d.speed));
     tog('b-plast', 'Learning: ', d.plast);
-    insights(d, nnb); runCharts(d, nnb); speciesList(d);
+    insights(d, nnb); runCharts(d, nnb); speciesList(d); islandTiles(); drawTree();
+    var isub = $('ins-sub'); if (isub) isub.textContent = 'on ' + ISL[view_i].n;
     if (inspId) inspector(d);
   }
   function tog(id, label, on) { var b = $(id); if (b) { b.textContent = label + (on ? 'on' : 'off'); b.classList.toggle('on', !!on); } }
@@ -306,6 +314,8 @@
     if (code === 9) { txt = 'A new species split off: <b>#' + e[3] + '</b>'; col = hsl(e[2], 70, 55); }
     else if (code === 10) { txt = 'Species #' + e[3] + ' died out'; col = '#555'; }
     else if (code === 6) { txt = 'A creature was eaten by another one (generation ' + fmtc(e[3]) + ')'; col = '#ff5a5a'; }
+    else if (code === 14) { txt = 'A creature swam off to ' + ISL[e[4]].n; col = '#5aa9ff'; }
+    else if (code === 15) { txt = 'A migrant arrived from ' + ISL[e[4]].n; col = '#5aa9ff'; }
     else if (code === 13) { txt = 'Killed by toxins (vent or poison algae)'; col = '#b45cf0'; }
     else if (code === 8 && e[5] >= 3) { txt = 'Died of old age, leaving ' + e[5] + ' children'; col = '#8f8f8f'; }
     else if (code === 7 && e[4] === 1 && Math.random() < 0.15) { txt = 'Born of two parents, ' + e[5] + ' neurons'; col = '#ff78be'; }
@@ -319,10 +329,84 @@
     el.insertBefore(row, el.firstChild); while (el.children.length > 6) el.removeChild(el.lastChild);
   }
 
+  /* ---------- the islands ---------- */
+  function islandTiles() {
+    var el = $('isls'); if (!el) return;
+    if (!el.children.length) {
+      el.innerHTML = ISL.map(function (x, i) { return '<div class="it" data-isl="' + i + '"><canvas id="ic' + i + '" width="96" height="96"></canvas><div class="nm">' + x.n + '</div><div class="st" id="is' + i + '">' + x.d + '</div></div>'; }).join('');
+    }
+    for (var i = 0; i < ISL.length; i++) {
+      var t = el.children[i]; t.classList.toggle('on', i === view_i);
+      var sm = isls[i], st = $('is' + i);
+      if (st && sm && sm.length) st.innerHTML = sm[1] + ' alive &middot; ' + sm[2] + ' species &middot; gen ' + fmtc(sm[3]);
+      var cv = $('ic' + i); if (!cv) continue;
+      var g = cv.getContext('2d'), W = cv.width, m = minis[i];
+      g.fillStyle = '#06080d'; g.fillRect(0, 0, W, W);
+      for (var v = 0; v < vents.length; v++) { g.fillStyle = 'rgba(150,60,200,' + (i === 1 ? 0.7 : 0.4) + ')'; g.beginPath(); g.arc(vents[v][0] / 1000 * W, vents[v][1] / 1000 * W, vents[v][2] / 1000 * W, 0, 6.2832); g.fill(); }
+      if (m) for (var k = 0; k < m.cr.length; k++) { g.fillStyle = hsl(m.cr[k][2], 70, 58); g.fillRect(Math.round(m.cr[k][0] / 1000 * W) - 1, Math.round(m.cr[k][1] / 1000 * W) - 1, 2, 2); }
+    }
+  }
+  function switchIsland(i) {
+    if (i === view_i) return;
+    view_i = i; pos = {}; hist = []; sptree = []; net = null; kar = null; ped = null; last = null;
+    closeInsp(); window.swSend('view', { i: i });
+    var f = $('feed'); if (f) f.innerHTML = '';
+  }
+
+  /* ---------- the species tree of this island ---------- */
+  function drawTree() {
+    var cv = $('tree-cv'); if (!cv || !last) return;
+    var w = cv.clientWidth, h = cv.clientHeight; if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+    var g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+    var rows = sptree.slice(0, 40).slice().reverse(); if (!rows.length) { g.fillStyle = '#5f5f5f'; g.font = '11px ui-sans-serif,-apple-system,sans-serif'; g.fillText('waiting for the first species to split...', 4, 16); return; }
+    var t0 = rows[0][3], t1 = last.tick, idx = {}, i;
+    for (i = 0; i < rows.length; i++) { if (rows[i][3] < t0) t0 = rows[i][3]; idx[rows[i][0]] = i; }
+    var X = function (t) { return 4 + (t - t0) / Math.max(1, t1 - t0) * (w - 44); }, Y = function (i) { return 6 + i * (h - 12) / Math.max(1, rows.length - 1); };
+    for (i = 0; i < rows.length; i++) {
+      var r = rows[i], alive = r[4] === 0, x0 = X(r[3]), x1 = X(alive ? t1 : r[4]), y = Y(i), col = hsl(r[2], 65, alive ? 58 : 40);
+      if (idx[r[1]] !== undefined) { g.strokeStyle = 'rgba(255,255,255,0.18)'; g.lineWidth = 1; g.beginPath(); g.moveTo(x0, Y(idx[r[1]])); g.lineTo(x0, y); g.stroke(); }
+      g.strokeStyle = col; g.lineWidth = alive ? 3 : 1.2; g.beginPath(); g.moveTo(x0, y); g.lineTo(Math.max(x0 + 2, x1), y); g.stroke();
+      if (alive) { g.fillStyle = col; g.font = '600 10px ui-sans-serif,-apple-system,sans-serif'; g.textAlign = 'left'; g.fillText('#' + r[0], x1 + 4, y + 3.5); }
+    }
+  }
+
+  /* ---------- the family tree of the inspected creature ---------- */
+  var CAUSE = { 4: 'starved', 5: 'predator', 6: 'eaten', 8: 'old age', 13: 'toxins', 14: 'emigrated' };
+  function recRow(r) { return [0, r[0], r[4], r[19], 0, 0, 1000, 0, 50, 100, r[10], r[11], r[12], r[13], r[14], r[15], r[16], r[17], r[18], 0, 0, 0, r[3], 0, r[8], 0, r[20], 0, 0, 0]; }
+  function drawPed() {
+    var cv = $('ped-cv'); if (!cv) return;
+    var w = cv.clientWidth, h = cv.clientHeight; if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+    var g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+    if (!ped || !ped.length || ped[0][2][0] !== inspId) { g.fillStyle = '#5f5f5f'; g.font = '11px ui-sans-serif,-apple-system,sans-serif'; g.textAlign = 'left'; g.fillText('tracing its ancestors...', 4, 16); return; }
+    var P = {}, i, n;
+    function xy(d, p) { return [(p + 0.5) / Math.pow(2, d) * w, h - 26 - d * (h - 44) / 4]; }
+    for (i = 0; i < ped.length; i++) P[ped[i][0] + ':' + ped[i][1]] = ped[i];
+    for (i = 0; i < ped.length; i++) {
+      n = ped[i]; if (n[0] === 0) continue;
+      var a = xy(n[0], n[1]), b = xy(n[0] - 1, n[1] >> 1);
+      g.strokeStyle = n[2][21] === 4 ? 'rgba(90,170,255,0.6)' : 'rgba(255,255,255,0.22)'; g.lineWidth = 1; g.beginPath(); g.moveTo(b[0], b[1] - 8); g.lineTo(a[0], a[1] + 8); g.stroke();
+    }
+    g.imageSmoothingEnabled = false;
+    for (i = 0; i < ped.length; i++) {
+      n = ped[i]; var r = n[2], q = xy(n[0], n[1]), sp = spriteOf(recRow(r)), sc = n[0] <= 1 ? 2 : n[0] === 2 ? 1.5 : 1, dead = r[7] > 0;
+      g.globalAlpha = dead ? 0.45 : 1;
+      g.drawImage(sp.cv[0], q[0] - sp.w * sc / 2, q[1] - sp.h * sc / 2, sp.w * sc, sp.h * sc);
+      g.globalAlpha = 1;
+      if (n[0] <= 2) {
+        g.fillStyle = dead ? '#777' : '#ededed'; g.font = (n[0] === 0 ? '600 ' : '') + '10px ui-sans-serif,-apple-system,sans-serif'; g.textAlign = 'center';
+        g.fillText('#' + r[0], q[0], q[1] + 18);
+        if (dead) { g.fillStyle = '#8f6060'; g.font = '9px ui-sans-serif,-apple-system,sans-serif'; g.fillText(CAUSE[r[9]] || '', q[0], q[1] + 28); }
+        else if (n[0] > 0) { g.fillStyle = '#50e3c2'; g.font = '9px ui-sans-serif,-apple-system,sans-serif'; g.fillText('alive', q[0], q[1] + 28); }
+      }
+      if (r[21] === 4) { g.fillStyle = '#5aa9ff'; g.font = '9px ui-sans-serif,-apple-system,sans-serif'; g.textAlign = 'center'; g.fillText('migrant', q[0], q[1] - 12); }
+    }
+    var fam = $('i-fam'); if (fam) { var gens = 0; for (i = 0; i < ped.length; i++) if (ped[i][0] > gens) gens = ped[i][0]; fam.textContent = ped.length + ' ancestors traced, ' + gens + ' generations up'; }
+  }
+
   /* ---------- the inspector ---------- */
   function openInsp(id) {
     var c = rowById(id); if (!c) return;
-    inspId = id; net = null; kar = null;
+    inspId = id; net = null; kar = null; ped = null;
     window.swSend('sel', { slot: c[0] });
     $('pg-story').classList.add('off'); $('pg-insp').classList.remove('off');
     setTimeout(resize, 30);
@@ -350,7 +434,7 @@
 
   /* ---------- controls ---------- */
   document.addEventListener('click', function (e) {
-    var t = e.target.closest ? e.target.closest('[data-speed],#b-pred,#b-plast,#b-save,#b-load,#b-reset,#b-close,.spr') : null;
+    var t = e.target.closest ? e.target.closest('[data-speed],#b-plast,#b-save,#b-load,#b-reset,#b-close,.spr,[data-isl]') : null;
     if (!t) return;
     if (t.hasAttribute('data-speed')) window.swSend('speed', { k: Number(t.getAttribute('data-speed')) });
     else if (t.id === 'b-plast') window.swSend('plast', {});
@@ -358,6 +442,7 @@
     else if (t.id === 'b-load') { window.swSend('load', {}); toast('Loading checkpoint...'); }
     else if (t.id === 'b-reset') { if (confirm('Start a new random world? The last checkpoint stays on disk until the next save.')) { hist = []; window.swSend('reset', {}); } }
     else if (t.id === 'b-close') closeInsp();
+    else if (t.hasAttribute('data-isl')) switchIsland(Number(t.getAttribute('data-isl')));
     else if (t.classList.contains('spr')) { var id = Number(t.getAttribute('data-id')); if (id) openInsp(id); }
   });
   function pick(mx, my) {
@@ -550,7 +635,7 @@
     requestAnimationFrame(frame);
     if (!AW) { resize(); return; }
     drawArena(now);
-    if (inspId) { drawBrain(now); drawGenome(now); }
+    if (inspId) { drawBrain(now); drawGenome(now); drawPed(); }
   }
   window.__swEvolve3 = { get last() { return last; }, sprite: spriteOf };
   resize();

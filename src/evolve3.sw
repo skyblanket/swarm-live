@@ -32,9 +32,13 @@ import Evolve3Js
 import Math
 import Std
 
-let max_slots = 150
-let pop_cap = 140
+let max_slots = 80
+let isl_cap = 50
+let n_isl = 4
 let WS = 1.6
+let k_lin = 500000000
+let k_dead = 700000000
+let k_isl = 300000
 let nmax = 24
 let n_out = 5
 let n_sens = 22
@@ -469,7 +473,7 @@ fun make_creature(tab, world, s, ha, hb, slot, gen, sp, x, y, e, mom, dad) {
       types: types_of(ns), inl: in_lists(cs, ns, ns), pids: pids, nn: length(ns), nc: length(cs),
       x: x, y: y, hx: Math.cos(a), hy: Math.sin(a), e: e, h: 100.0, age: 0, life: 2200 + rndi(1400),
       cool: 160, acd: 0, kids: 0, kills: 0, eaten: 0, pain: 0, sig: 0.0, bite: 0, mate: 0, outs: [0.0, 0.0, 0.0, 0.0, 0.0],
-      sv: [], mom: mom, dad: dad, killer: 0}
+      sv: [], mom: mom, dad: dad, killer: 0, vk: g(s, 'vk')}
 }
 
 fun types_of(ns) { if (length(ns) == 0) { [] } else { [nth(hd(ns), 1) | types_of(tl(ns))] } }
@@ -529,7 +533,8 @@ fun plant_pos(t, tries) {
     if (tries <= 0 || in_obstacle(x, y, obstacles()) == false) { [x, y, 0] } else { plant_pos(t, tries - 1) }
 }
 
-fun init_plants(k, t) { if (k <= 0) { [] } else { [plant_pos(t, 10) | init_plants(k - 1, t)] } }
+fun init_plants(k, t) { ip_acc(k, t, []) }
+fun ip_acc(k, t, acc) { if (k <= 0) { acc } else { ip_acc(k - 1, t, [plant_pos(t, 10) | acc]) } }
 
 fun free_pos(tries) {
     x = 0.06 + rndf() * (WS - 0.12)
@@ -543,16 +548,22 @@ fun poison_pos() {
     if (rndf() < 0.7) { [clampw(hd(v) + gauss() * nth(v, 2) * 1.6), clampw(nth(v, 1) + gauss() * nth(v, 2) * 1.6)] }
     else { [0.04 + rndf() * (WS - 0.08), 0.04 + rndf() * (WS - 0.08)] }
 }
-fun init_poison(k) { if (k <= 0) { [] } else { [poison_pos() | init_poison(k - 1)] } }
+fun init_poison(k) { ipo_acc(k, []) }
+fun ipo_acc(k, acc) { if (k <= 0) { acc } else { ipo_acc(k - 1, [poison_pos() | acc]) } }
 
-fun slots(k) { if (k >= max_slots) { [] } else { [k | slots(k + 1)] } }
+fun slots(k, hi) { if (k >= hi) { [] } else { [k | slots(k + 1, hi)] } }
 
-fun new_world() {
-    %{crs: [], plants: init_plants(150, 0), meat: [], poison: init_poison(30),
-      preds: [[0.9, 0.9, 0, 200, 0.0 - 1.0, 0.0], [0.1, 0.1, 0, 300, 1.0, 0.0]],
-      free: slots(0), next_id: 1, tick: 0, init: 0,
+# four islands, four climates: same rocks and vents, different food, poison and vent strength
+fun isl_plants(i) { nth([150, 150, 95, 210], i) }
+fun isl_poison(i) { nth([30, 75, 20, 30], i) }
+fun isl_vk(i) { nth([1.0, 2.2, 1.0, 1.0], i) }
+
+fun new_world(isl) {
+    %{crs: [], plants: init_plants(isl_plants(isl), 0), meat: [], poison: init_poison(isl_poison(isl)),
+      preds: [], isl: isl, vk: isl_vk(isl), cap: isl_cap, sptree: [], mig_in: 0, mig_out: 0,
+      free: slots(isl * max_slots, (isl + 1) * max_slots), next_id: isl * 10000000 + 1, tick: 0, init: 0,
       b_sex: 0, b_bud: 0, b_imm: 0, d_starve: 0, d_pred: 0, d_eaten: 0, d_old: 0, d_toxic: 0,
-      maxgen: 0, sps: [], sp_next: 1, hof: [], evs: [], ck_tick: 0, ck_note: "", pred_on: 1, hist: []}
+      maxgen: 0, sps: [], sp_next: isl * 100000 + 1, hof: [], evs: [], ck_tick: 0, ck_note: "", pred_on: 1, hist: []}
 }
 
 # ---- senses: 18 numbers per creature ----
@@ -683,11 +694,16 @@ fun senses(s, c) {
 # ------------------------------------------------------------
 # The tick
 # ------------------------------------------------------------
+# senses are recomputed every other tick (staggered across creatures); in between only the
+# body senses (energy, health, pain) are refreshed
+fun live_body(sv, c) { set_at(set_at(set_at(sv, 14, g(c, 'e') / 100.0), 15, g(c, 'h') / 100.0), 16, if (g(c, 'pain') > 0) { 1.0 } else { 0.0 }) }
+
 fun sense_all(s, crs, plast, acc) {
     if (length(crs) == 0) { acc }
     else {
         c = hd(crs)
-        sv = senses(s, c)
+        old = g(c, 'sv')
+        sv = if ((g(s, 'tick') + g(c, 'id')) % 2 == 1 && old != nil && length(old) == n_sens) { live_body(old, c) } else { senses(s, c) }
         send_all(g(c, 'pids'), {'tick', sv, plast})
         sense_all(s, tl(crs), plast, [p(c, 'sv', sv) | acc])
     }
@@ -751,7 +767,7 @@ fun act_one(tab, c) {
     p(p(p(p(p(c1, 'e', g(c1, 'e') - cost), 'outs', o), 'sig', nth(o, 3)), 'bite', if (nth(o, 2) > 0.3) { 1 } else { 0 }), 'mate', if (nth(o, 4) > 0.0) { 1 } else { 0 })
 }
 
-fun flee_pass(tab, all, crs) {
+fun flee_pass(tab, isl, all, crs) {
     if (length(crs) == 0) { 'ok' }
     else {
         c = hd(crs)
@@ -760,10 +776,10 @@ fun flee_pass(tab, all, crs) {
         if (hn != nil && hd(hn) < sight && hd(hn) > 0.0001) {
             vmax = 0.011 * nth(g(c, 'ph'), 1) + 0.000001
             f = clampf(numf(g(c, 'v')) / vmax, 0.0, 1.0) * (0.0 - (g(c, 'hx') * nth(hn, 1) + g(c, 'hy') * nth(hn, 2)) / hd(hn))
-            cput(tab, 'fl_sum', numf(cget(tab, 'fl_sum')) + f)
-            cput(tab, 'fl_n', num(cget(tab, 'fl_n')) + 1)
+            cput(tab, k_isl + 500 + isl * 2, numf(cget(tab, k_isl + 500 + isl * 2)) + f)
+            cput(tab, k_isl + 501 + isl * 2, num(cget(tab, k_isl + 501 + isl * 2)) + 1)
         } else { 'x' }
-        flee_pass(tab, all, tl(crs))
+        flee_pass(tab, isl, all, tl(crs))
     }
 }
 
@@ -787,12 +803,13 @@ fun eat_plants(lst, c, t, acc, ate) {
 }
 
 # eaten plants regrow somewhere in a patch once their timer runs out (once per tick)
-fun grow_plants(lst, t) {
-    if (length(lst) == 0) { [] }
+fun grow_plants(lst, t) { rev(grow_acc(lst, t, []), []) }
+fun grow_acc(lst, t, acc) {
+    if (length(lst) == 0) { acc }
     else {
         it = hd(lst)
         tm = nth(it, 2)
-        [if (tm <= 0) { it } else { if (tm == 1) { plant_pos(t, 10) } else { [hd(it), nth(it, 1), tm - 1] } } | grow_plants(tl(lst), t)]
+        grow_acc(tl(lst), t, [if (tm <= 0) { it } else { if (tm == 1) { plant_pos(t, 10) } else { [hd(it), nth(it, 1), tm - 1] } } | acc])
     }
 }
 
@@ -826,9 +843,14 @@ fun feed_all(s, crs, acc) {
     else {
         c = hd(crs)
         diet = nth(g(c, 'ph'), 5)
-        q = eat_poison(g(s, 'poison'), c, [], 0)
-        f = eat_plants(g(s, 'plants'), c, g(s, 'tick'), [], 0)
-        m = eat_meat(g(s, 'meat'), c, [], 0.0)
+        sv = g(c, 'sv')
+        sight = nth(g(c, 'ph'), 4)
+        near_p = sv == nil || length(sv) < n_sens || (1.0 - nth(sv, 2)) * sight < 0.09
+        near_m = sv == nil || length(sv) < n_sens || (1.0 - nth(sv, 4)) * sight < 0.09
+        near_q = sv == nil || length(sv) < n_sens || (1.0 - nth(sv, 19)) * sight < 0.09
+        q = if (near_q) { eat_poison(g(s, 'poison'), c, [], 0) } else { {g(s, 'poison'), 0} }
+        f = if (near_p) { eat_plants(g(s, 'plants'), c, g(s, 'tick'), [], 0) } else { {g(s, 'plants'), 0} }
+        m = if (near_m) { eat_meat(g(s, 'meat'), c, [], 0.0) } else { {g(s, 'meat'), 0.0} }
         gain = to_float(elem(f, 1)) * 26.0 * (1.0 - 0.75 * diet) + elem(m, 1) * (0.25 + 0.75 * diet)
         c1 = if (gain > 0.0) { p(p(c, 'e', fmin(100.0, g(c, 'e') + gain)), 'eaten', g(c, 'eaten') + 1) } else { c }
         c2 = if (elem(q, 1) > 0) { p(p(p(p(c1, 'h', g(c1, 'h') - 24.0), 'e', g(c1, 'e') - 4.0), 'pain', 10), 'killer', 0 - 2) } else { c1 }
@@ -846,7 +868,7 @@ fun in_reach(crs, a, best) {
         dx = g(c, 'x') - g(a, 'x')
         dy = g(c, 'y') - g(a, 'y')
         d = Math.sqrt(dx * dx + dy * dy)
-        ok = g(c, 'id') != g(a, 'id') && g(c, 'h') > 0.0 && d < 0.035 + 0.014 * nth(g(a, 'ph'), 0)
+        ok = g(c, 'id') != g(a, 'id') && g(c, 'sp') != g(a, 'sp') && g(c, 'h') > 0.0 && d < 0.035 + 0.014 * nth(g(a, 'ph'), 0)
         in_reach(tl(crs), a, if (ok && (best == nil || d < elem(best, 0))) { {d, g(c, 'id')} } else { best })
     }
 }
@@ -931,7 +953,7 @@ fun vitals(c) {
            0.006 * nth(ph, 2) + 0.005 * nth(ph, 3) + 0.02 * nth(ph, 4) + 0.03 * nth(ph, 11)
     tox = toxicity(g(c, 'x'), g(c, 'y'), vents())
     regen = g(c, 'e') > 40.0 && g(c, 'h') < 100.0 && tox == 0.0
-    c0 = if (tox > 0.0) { p(p(p(c, 'h', g(c, 'h') - 0.5 * tox), 'pain', 6), 'killer', 0 - 2) } else { c }
+    c0 = if (tox > 0.0) { p(p(p(c, 'h', g(c, 'h') - 1.2 * tox * numf(g(c, 'vk'))), 'pain', 6), 'killer', 0 - 2) } else { c }
     vitals2(c0, cost, regen)
 }
 
@@ -943,7 +965,7 @@ fun vitals2(c, cost, regen) {
 fun map_vitals(crs, acc) { if (length(crs) == 0) { acc } else { map_vitals(tl(crs), [vitals(hd(crs)) | acc]) } }
 
 # ---- death: the brain's processes stop, the body becomes meat ----
-fun reap(s, crs, keep) {
+fun reap(tab, s, crs, keep) {
     if (length(crs) == 0) { p(s, 'crs', keep) }
     else {
         c = hd(crs)
@@ -952,19 +974,22 @@ fun reap(s, crs, keep) {
         old = g(c, 'age') >= g(c, 'life')
         if (starved || slain || old) {
             kill_brain(c)
+            why0 = 0
             why = if (slain) { if (g(c, 'killer') > 0) { 6 } else { if (g(c, 'killer') == 0 - 2) { 13 } else { 5 } } } else { if (starved) { 4 } else { 8 } }
             key = if (why == 6) { 'd_eaten' } else { if (why == 13) { 'd_toxic' } else { if (why == 5) { 'd_pred' } else { if (why == 4) { 'd_starve' } else { 'd_old' } } } }
+            lin_died(tab, c, why, g(s, 'tick'))
             meat = [g(c, 'x'), g(c, 'y'), 14.0 + 26.0 * nth(g(c, 'ph'), 0), 520]
             s1 = p(p(p(p(s, key, g(s, key) + 1), 'free', [g(c, 'slot') | g(s, 'free')]), 'meat', [meat | g(s, 'meat')]),
                    'hof', hof_add(g(s, 'hof'), c))
-            reap(p(s1, 'evs', [[why, g(c, 'slot'), Math.round(nth(g(c, 'ph'), 6)), g(c, 'gen'), g(c, 'age'), g(c, 'kids')] | g(s1, 'evs')]), tl(crs), keep)
-        } else { reap(s, tl(crs), [c | keep]) }
+            reap(tab, p(s1, 'evs', [[why, g(c, 'slot'), Math.round(nth(g(c, 'ph'), 6)), g(c, 'gen'), g(c, 'age'), g(c, 'kids')] | g(s1, 'evs')]), tl(crs), keep)
+        } else { reap(tab, s, tl(crs), [c | keep]) }
     }
 }
 
-fun age_meat(lst) {
-    if (length(lst) == 0) { [] }
-    else { it = hd(lst)  if (nth(it, 3) <= 1) { age_meat(tl(lst)) } else { [[hd(it), nth(it, 1), nth(it, 2), nth(it, 3) - 1] | age_meat(tl(lst))] } }
+fun age_meat(lst) { rev(am_acc(lst, []), []) }
+fun am_acc(lst, acc) {
+    if (length(lst) == 0) { acc }
+    else { it = hd(lst)  am_acc(tl(lst), if (nth(it, 3) <= 1) { acc } else { [[hd(it), nth(it, 1), nth(it, 2), nth(it, 3) - 1] | acc] }) }
 }
 
 # hall of fame: the genomes that left the most children
@@ -982,14 +1007,54 @@ fun hof_ins(h, e) { if (length(h) == 0) { [e] } else { if (hd(e) >= hd(hd(h))) {
 # ---- birth ----
 fun birth(tab, world, s, ha, hb, gen, sp, x, y, e, mom, dad, kind) {
     fr = g(s, 'free')
-    if (length(fr) == 0 || length(g(s, 'crs')) >= pop_cap) { s }
+    if (length(fr) == 0 || length(g(s, 'crs')) >= g(s, 'cap')) { s }
     else {
         c = make_creature(tab, world, s, ha, hb, hd(fr), gen, sp, x, y, e, mom, dad)
-        key = if (kind == 1) { 'b_sex' } else { if (kind == 2) { 'b_bud' } else { 'b_imm' } }
+        lin_put(tab, c, s, kind)
+        key = if (kind == 1) { 'b_sex' } else { if (kind == 2) { 'b_bud' } else { if (kind == 4) { 'mig_in' } else { 'b_imm' } } }
         s0 = p(p(p(s, 'crs', [c | g(s, 'crs')]), 'free', tl(fr)), 'next_id', g(s, 'next_id') + 1)
         s1 = if (kind == 0) { s0 } else { p(s0, key, g(s0, key) + 1) }
         s2 = p(s1, 'maxgen', if (gen > g(s1, 'maxgen')) { gen } else { g(s1, 'maxgen') })
-        if (kind == 0) { s2 } else { p(s2, 'evs', [[7, g(c, 'slot'), Math.round(nth(g(c, 'ph'), 6)), gen, kind, g(c, 'nn')] | g(s2, 'evs')]) }
+        if (kind == 0 || kind == 4) { s2 } else { p(s2, 'evs', [[7, g(c, 'slot'), Math.round(nth(g(c, 'ph'), 6)), gen, kind, g(c, 'nn')] | g(s2, 'evs')]) }
+    }
+}
+
+# ---- the family tree: one record per creature, kept in ETS by id (the last 30000 per island)
+# [id, mom, dad, gen, species, born, island, died, kids, cause, size, speed, armor, attack, sight, diet, p1, p2, p3, hue, neurons, kind]
+fun lin_key(id) { k_lin + id }
+fun lin_put(tab, c, s, kind) {
+    ph = g(c, 'ph')
+    id = g(c, 'id')
+    tput(tab, lin_key(id), [id, g(c, 'mom'), g(c, 'dad'), g(c, 'gen'), g(c, 'sp'), g(s, 'tick'), g(s, 'isl'), 0, 0, 0,
+        r2(nth(ph, 0)), r2(nth(ph, 1)), r2(nth(ph, 2)), r2(nth(ph, 3)), r2(nth(ph, 4)), r2(nth(ph, 5)), r2(nth(ph, 7)), r2(nth(ph, 8)), r2(nth(ph, 9)),
+        Math.round(nth(ph, 6)), g(c, 'nn'), kind])
+    old = id - 30000
+    if (old > g(s, 'isl') * 10000000) { ets_delete(tab + lin_key(old) % 16, lin_key(old))  ets_delete(tab + (k_dead + old) % 16, k_dead + old) } else { 'x' }
+}
+fun set_at(l, k, v) { if (k == 0) { [v | tl(l)] } else { [hd(l) | set_at(tl(l), k - 1, v)] } }
+# death info goes under its own key, written once (records are never overwritten in place)
+fun lin_died(tab, c, why, tick) { tput(tab, k_dead + g(c, 'id'), [tick, g(c, 'kids'), why]) }
+fun lin_kids(tab, c) {
+    r = tget(tab, lin_key(g(c, 'id')))
+    if (r == nil) { 'x' } else { tput(tab, lin_key(g(c, 'id')), set_at(r, 8, g(c, 'kids'))) }
+}
+
+# pedigree of one creature: [[depth, position, record]], parents above children, 4 generations up
+fun ped(tab, id, depth, pos, maxd) {
+    r0 = if (id > 0) { tget(tab, lin_key(id)) } else { nil }
+    dd = if (r0 == nil) { nil } else { tget(tab, k_dead + id) }
+    r = if (dd == nil) { r0 } else { set_at(set_at(set_at(r0, 7, hd(dd)), 8, nth(dd, 1)), 9, nth(dd, 2)) }
+    if (r == nil) { [] }
+    else {
+        me = [[depth, pos, r]]
+        if (depth >= maxd) { me }
+        else {
+            mom = nth(r, 1)
+            dad = nth(r, 2)
+            up1 = ped(tab, mom, depth + 1, pos * 2, maxd)
+            up2 = if (dad != mom) { ped(tab, dad, depth + 1, pos * 2 + 1, maxd) } else { [] }
+            app(me, app(up1, up2))
+        }
     }
 }
 
@@ -1008,7 +1073,7 @@ fun find_mate(crs, c, best) {
     }
 }
 
-fun pay(crs, id, cost, kid) { upd(crs, id, fun(c) { p(p(p(c, 'e', g(c, 'e') - cost), 'cool', 220), 'kids', g(c, 'kids') + kid) }) }
+fun pay_old(crs, id, cost, kid) { upd(crs, id, fun(c) { p(p(p(c, 'e', g(c, 'e') - cost), 'cool', 220), 'kids', g(c, 'kids') + kid) }) }
 
 fun breed(tab, world, s, ids) {
     if (length(ids) == 0) { s }
@@ -1036,6 +1101,8 @@ fun breed(tab, world, s, ids) {
         }
     }
 }
+
+fun pay(crs, id, cost, kid) { upd(crs, id, fun(c) { p(p(p(c, 'e', g(c, 'e') - cost), 'cool', 220), 'kids', g(c, 'kids') + kid) }) }
 
 fun ids_of(crs) { if (length(crs) == 0) { [] } else { [g(hd(crs), 'id') | ids_of(tl(crs))] } }
 
@@ -1094,7 +1161,7 @@ fun speciate(s, crs, sps, acc, t) {
         else {
             sid = elem(t, 0)
             sps2 = app(sps, [[sid, g(c, 'ph'), Math.round(nth(g(c, 'ph'), 6)), g(s, 'tick')]])
-            speciate(s, tl(crs), sps2, [p(c, 'sp', sid) | acc], {sid + 1, [[9, g(c, 'slot'), Math.round(nth(g(c, 'ph'), 6)), sid, 0, 0] | elem(t, 1)]})
+            speciate(s, tl(crs), sps2, [p(c, 'sp', sid) | acc], {sid + 1, [[9, g(c, 'slot'), Math.round(nth(g(c, 'ph'), 6)), sid, g(c, 'sp'), 0] | elem(t, 1)]})
         }
     }
 }
@@ -1116,7 +1183,29 @@ fun species_step(s) {
     r = speciate(s, g(s, 'crs'), g(s, 'sps'), [], {g(s, 'sp_next'), []})
     crs = elem(r, 0)
     pr = prune_sps(elem(r, 1), crs, [], [])
-    p(p(p(p(s, 'crs', crs), 'sps', elem(pr, 0)), 'sp_next', elem(elem(r, 2), 0)), 'evs', app(elem(pr, 1), app(elem(elem(r, 2), 1), g(s, 'evs'))))
+    tree = tree_kill(tree_add(g(s, 'sptree'), elem(elem(r, 2), 1), g(s, 'tick')), elem(pr, 1), g(s, 'tick'))
+    p(p(p(p(p(s, 'crs', crs), 'sps', elem(pr, 0)), 'sp_next', elem(elem(r, 2), 0)), 'sptree', cap(tree, 160)),
+      'evs', app(elem(pr, 1), app(elem(elem(r, 2), 1), g(s, 'evs'))))
+}
+
+# species tree entries [species, parent species, hue, born tick, died tick (0 = alive)], newest first
+fun tree_add(tree, evs, tick) {
+    if (length(evs) == 0) { tree }
+    else { e = hd(evs)  tree_add(if (hd(e) == 9) { [[nth(e, 3), nth(e, 4), nth(e, 2), tick, 0] | tree] } else { tree }, tl(evs), tick) }
+}
+fun tree_kill(tree, evs, tick) {
+    if (length(evs) == 0) { tree }
+    else { e = hd(evs)  tree_kill(if (hd(e) == 10) { tree_mark(tree, nth(e, 3), tick) } else { tree }, tl(evs), tick) }
+}
+fun tree_mark(tree, sid, tick) {
+    if (length(tree) == 0) { [] }
+    else { r = hd(tree)  if (hd(r) == sid && nth(r, 4) == 0) { [[hd(r), nth(r, 1), nth(r, 2), nth(r, 3), tick] | tl(tree)] } else { [r | tree_mark(tl(tree), sid, tick)] } }
+}
+fun tree_seed(sps) { if (length(sps) == 0) { [] } else { r = hd(sps)  [[hd(r), 0, nth(r, 2), nth(r, 3), 0] | tree_seed(tl(sps))] } }
+fun fix_tree(l) { if (l == nil || length(l) == 0) { [] } else { [ints(hd(l)) | fix_tree(tl(l))] } }
+
+fun species_step_unused(s) {
+    s
 }
 
 fun sp_rows(sps, crs) {
@@ -1138,7 +1227,7 @@ fun save(s, name) {
     data = %{v: 3, tick: g(s, 'tick'), maxgen: g(s, 'maxgen'), sp_next: g(s, 'sp_next'),
              b_sex: g(s, 'b_sex'), b_bud: g(s, 'b_bud'), b_imm: g(s, 'b_imm'),
              d_starve: g(s, 'd_starve'), d_pred: g(s, 'd_pred'), d_eaten: g(s, 'd_eaten'), d_old: g(s, 'd_old'), d_toxic: num(g(s, 'd_toxic')),
-             sps: g(s, 'sps'), hof: g(s, 'hof'), hist: g(s, 'hist'), cr: ck_creatures(g(s, 'crs'))}
+             sps: g(s, 'sps'), hof: g(s, 'hof'), hist: g(s, 'hist'), sptree: g(s, 'sptree'), mig_in: g(s, 'mig_in'), mig_out: g(s, 'mig_out'), cr: ck_creatures(g(s, 'crs'))}
     path = ck_dir ++ "/" ++ name
     file_atomic_write(path, json_encode(data))
     p(p(p(s, 'ck_tick', g(s, 'tick')), 'ck_note', name), 'evs', [[11, 0, 0, g(s, 'maxgen'), length(g(s, 'crs')), 0] | g(s, 'evs')])
@@ -1173,12 +1262,17 @@ fun load(tab, world, s, name) {
         if (d == nil || g(d, 'cr') == nil) { s }
         else {
             kill_all(g(s, 'crs'))
-            w0 = new_world()
+            isl = g(s, 'isl')
+            w0 = new_world(isl)
             w1 = p(p(p(p(p(p(p(p(p(p(p(p(w0, 'tick', to_int(g(d, 'tick'))), 'maxgen', to_int(g(d, 'maxgen'))), 'sp_next', to_int(g(d, 'sp_next'))),
                   'b_sex', to_int(g(d, 'b_sex'))), 'b_bud', to_int(g(d, 'b_bud'))), 'b_imm', to_int(g(d, 'b_imm'))),
                   'd_starve', to_int(g(d, 'd_starve'))), 'd_pred', to_int(g(d, 'd_pred'))), 'd_eaten', to_int(g(d, 'd_eaten'))), 'd_old', to_int(g(d, 'd_old'))), 'd_toxic', to_int(num(g(d, 'd_toxic')))),
                   'sps', fix_sps(g(d, 'sps')))
-            w2 = p(p(p(p(w1, 'hof', fix_hof(g(d, 'hof'))), 'init', 1), 'ck_note', "resumed " ++ name), 'hist', fix_hist(g(d, 'hist')))
+            spn = to_int(g(d, 'sp_next'))
+            tr = fix_tree(g(d, 'sptree'))
+            w2a = p(p(p(p(w1, 'hof', fix_hof(g(d, 'hof'))), 'init', 1), 'ck_note', "resumed " ++ name), 'hist', fix_hist(g(d, 'hist')))
+            w2 = p(p(p(p(w2a, 'sp_next', if (spn > isl * 100000) { spn } else { isl * 100000 + 1 }), 'sptree', if (length(tr) == 0) { tree_seed(g(w2a, 'sps')) } else { tr }),
+                   'mig_in', to_int(num(g(d, 'mig_in')))), 'mig_out', to_int(num(g(d, 'mig_out'))))
             w3 = load_crs(tab, world, w2, g(d, 'cr'))
             p(p(w3, 'ck_tick', g(w3, 'tick')), 'evs', [[12, 0, 0, g(w3, 'maxgen'), length(g(w3, 'crs')), 0] | g(w3, 'evs')])
         }
@@ -1190,31 +1284,75 @@ fun kill_all(crs) { if (length(crs) == 0) { 'ok' } else { kill_brain(hd(crs))  k
 # ------------------------------------------------------------
 # The world loop
 # ------------------------------------------------------------
+fun ck_name(isl) { "island-" ++ to_string(isl) ++ ".json" }
+
+# each island is its own world process; they run in parallel on separate schedulers
 fun world_loop(tab, s) {
-    cmd = cget(tab, 'cmd')
-    if (cmd != nil) { cput(tab, 'cmd', nil) } else { 'x' }
+    isl = g(s, 'isl')
+    cmd = cget(tab, k_isl + 200 + isl)
+    if (cmd != nil) { cput(tab, k_isl + 200 + isl, nil) } else { 'x' }
     if (g(s, 'init') == 0) {
-        s1 = load(tab, self(), s, "latest.json")
-        s2 = if (length(g(s1, 'crs')) == 0) { founders(tab, self(), p(s1, 'init', 1), 70) } else { s1 }
+        cput(tab, k_isl + 300 + isl, self())
+        own = ck_dir ++ "/" ++ ck_name(isl)
+        s1 = if (file_exists(own) == 'true') { load(tab, self(), s, ck_name(isl)) } else { load(tab, self(), s, "latest.json") }
+        s2 = if (length(g(s1, 'crs')) == 0) { founders(tab, self(), p(s1, 'init', 1), 50) } else { s1 }
         drain_acks()
         world_loop(tab, p(s2, 'init', 1))
     } else { if (cmd == 'reset') {
         kill_all(g(s, 'crs'))
         drain_acks()
-        world_loop(tab, founders(tab, self(), p(new_world(), 'init', 1), 70))
+        world_loop(tab, founders(tab, self(), p(new_world(isl), 'init', 1), 50))
     } else { if (cmd == 'load') {
-        s1 = load(tab, self(), s, "latest.json")
+        s1 = load(tab, self(), s, ck_name(isl))
         drain_acks()
         world_loop(tab, s1)
     } else {
-        s0 = if (cmd == 'save') { save(s, "latest.json") } else { s }
+        s0 = if (cmd == 'save') { save(s, ck_name(isl)) } else { s }
         world_loop(tab, step(tab, s0))
     } } }
 }
 
-fun step(tab, s) {
+# migrants arrive as messages from other island processes
+fun recv_migrants(tab, world, s) {
+    receive {
+        {'mig', ha, hb, gen, sp, from, fromid} ->
+            pos = free_pos(20)
+            s1 = birth(tab, world, s, ha, hb, gen, sp, hd(pos), nth(pos, 1), 65.0, fromid, fromid, 4)
+            arrived = length(g(s1, 'crs')) > length(g(s, 'crs'))
+            recv_migrants(tab, world, if (arrived) { p(s1, 'evs', [[15, 0, Math.round(nth(g(hd(g(s1, 'crs')), 'ph'), 6)), gen, from, 0] | g(s1, 'evs')]) } else { s1 })
+        after 0 { s }
+    }
+}
+
+# now and then an adult swims off to another island: its genome travels as a message
+fun emigrate(tab, s, tick) {
+    isl = g(s, 'isl')
+    crs = g(s, 'crs')
+    due = tick % 700 == (isl * 175) % 700 && length(crs) > 20 && rndf() < 0.7
+    if (due == false) { s }
+    else {
+        c = nth(crs, rndi(length(crs)))
+        dest = (isl + 1 + rndi(n_isl - 1)) % n_isl
+        pid = cget(tab, k_isl + 300 + dest)
+        if (pid == nil || g(c, 'age') < 300) { s }
+        else {
+            send(pid, {'mig', g(c, 'ha'), g(c, 'hb'), g(c, 'gen'), g(c, 'sp'), isl, g(c, 'id')})
+            kill_brain(c)
+            lin_died(tab, c, 14, tick)
+            s1 = p(p(p(s, 'crs', remove_id(crs, g(c, 'id'))), 'free', [g(c, 'slot') | g(s, 'free')]), 'mig_out', g(s, 'mig_out') + 1)
+            p(s1, 'evs', [[14, g(c, 'slot'), Math.round(nth(g(c, 'ph'), 6)), g(c, 'gen'), dest, 0] | g(s1, 'evs')])
+        }
+    }
+}
+fun remove_id(crs, id) { if (length(crs) == 0) { [] } else { if (g(hd(crs), 'id') == id) { tl(crs) } else { [hd(crs) | remove_id(tl(crs), id)] } } }
+
+fun nsp_alive(s) { length(g(s, 'sps')) }
+
+fun step(tab, s0x) {
     t0 = timestamp()
-    cput(tab, 'hb', t0)
+    isl = g(s0x, 'isl')
+    cput(tab, k_isl + 100 + isl, t0)
+    s = recv_migrants(tab, self(), s0x)
     sp = if (num(cget(tab, 'speed')) < 1) { 1 } else { num(cget(tab, 'speed')) }
     plast = num(cget(tab, 'plast'))
     s0 = p(s, 'pred_on', num(cget(tab, 'pred_on')))
@@ -1222,20 +1360,24 @@ fun step(tab, s) {
     crs0 = sense_all(s0, g(s0, 'crs'), plast, [])
     left = wait_acks(count_neurons(crs0, 0), 0)
     crs1 = act_all(tab, crs0, [])
-    flee_pass(tab, crs1, crs1)
+    if (g(s, 'tick') % 4 == 0) { flee_pass(tab, isl, crs1, crs1) } else { 'x' }
     s1 = feed_all(p(s0, 'crs', []), crs1, [])
     crs2 = fight(g(s1, 'crs'), g(s1, 'crs'))
     s2 = p(s1, 'crs', crs2)
-    s3 = reap(p(p(p(s2, 'crs', []), 'meat', age_meat(g(s2, 'meat'))), 'plants', grow_plants(g(s2, 'plants'), g(s2, 'tick'))), map_vitals(g(s2, 'crs'), []), [])
-    s4 = breed(tab, self(), s3, ids_of(g(s3, 'crs')))
-    tick = g(s4, 'tick') + 1
-    s5 = if (length(g(s4, 'crs')) < 40 && tick % 30 == 0) { immigrate(tab, self(), s4) } else { s4 }
+    s3 = reap(tab, p(p(p(s2, 'crs', []), 'meat', age_meat(g(s2, 'meat'))), 'plants', grow_plants(g(s2, 'plants'), g(s2, 'tick'))), map_vitals(g(s2, 'crs'), []), [])
+    s4a = breed(tab, self(), s3, ids_of(g(s3, 'crs')))
+    tick = g(s4a, 'tick') + 1
+    s4 = emigrate(tab, s4a, tick)
+    s5 = if (length(g(s4, 'crs')) < 20 && tick % 30 == 0) { immigrate(tab, self(), s4) } else { s4 }
     s6a = if (tick % 40 == 0) { species_step(s5) } else { s5 }
     s6 = if (tick % 500 == 0) { p(p(s6a, 'hist', cap([app(hist_sample(s6a, tick), flee_sample(tab, s6a)) | g(s6a, 'hist')], 400)), 'eaten_mark', g(s6a, 'd_eaten')) } else { s6a }
-    s7 = if (tick - g(s6, 'ck_tick') >= 4000) { save(s6, "latest.json") } else { s6 }
-    every = if (sp == 1) { 1 } else { if (sp == 2) { 1 } else { 3 } }
-    emit = tick % every == 0
+    s7 = if (tick - g(s6, 'ck_tick') >= 4000) { save(s6, ck_name(isl)) } else { s6 }
+    if (tick % 20 == 0) { cput(tab, k_isl + 400 + isl, [isl, length(g(s7, 'crs')), nsp_alive(s7), g(s7, 'maxgen'), tick, g(s7, 'mig_in'), g(s7, 'mig_out'), forage_of(g(s7, 'crs'))]) } else { 'x' }
+    every = 1
+    viewed = num(cget(tab, 'view')) == isl
+    emit = viewed && tick % every == 0
     if (emit) { frame(tab, s7, tick, left, sp) } else { 'skip' }
+    if (viewed == false && tick % (every * 4) == 0) { mini(s7) } else { 'x' }
     spent = timestamp() - t0
     period = if (sp == 1) { tick_ms } else { if (sp == 2) { 10 } else { 0 } }
     if (spent < period) { sleep(period - spent) } else { 'late' }
@@ -1258,13 +1400,16 @@ fun cr_row(c) {
 
 fun cr_rows(crs) { if (length(crs) == 0) { [] } else { [cr_row(hd(crs)) | cr_rows(tl(crs))] } }
 
-fun plant_pts(lst) {
-    if (length(lst) == 0) { [] }
-    else { it = hd(lst)  if (nth(it, 2) > 0) { plant_pts(tl(lst)) } else { [[r3(hd(it) / WS), r3(nth(it, 1) / WS)] | plant_pts(tl(lst))] } }
+fun plant_pts(lst) { rev(pp_acc(lst, []), []) }
+fun pp_acc(lst, acc) {
+    if (length(lst) == 0) { acc }
+    else { it = hd(lst)  pp_acc(tl(lst), if (nth(it, 2) > 0) { acc } else { [[r3(hd(it) / WS), r3(nth(it, 1) / WS)] | acc] }) }
 }
-fun meat_pts(lst) { if (length(lst) == 0) { [] } else { it = hd(lst)  [[r3(hd(it) / WS), r3(nth(it, 1) / WS), Math.round(nth(it, 2))] | meat_pts(tl(lst))] } }
+fun meat_pts(lst) { rev(mp_acc(lst, []), []) }
+fun mp_acc(lst, acc) { if (length(lst) == 0) { acc } else { it = hd(lst)  mp_acc(tl(lst), [[r3(hd(it) / WS), r3(nth(it, 1) / WS), Math.round(nth(it, 2))] | acc]) } }
 fun pred_pts(lst) { if (length(lst) == 0) { [] } else { pr = hd(lst)  [[r3(hd(pr)), r3(nth(pr, 1)), nth(pr, 2), nth(pr, 3)] | pred_pts(tl(lst))] } }
-fun pois_pts(lst) { if (length(lst) == 0) { [] } else { it = hd(lst)  [[r3(hd(it) / WS), r3(nth(it, 1) / WS)] | pois_pts(tl(lst))] } }
+fun pois_pts(lst) { rev(po_acc(lst, []), []) }
+fun po_acc(lst, acc) { if (length(lst) == 0) { acc } else { it = hd(lst)  po_acc(tl(lst), [[r3(hd(it) / WS), r3(nth(it, 1) / WS)] | acc]) } }
 fun meadows(k, t) { if (k >= 6) { [] } else { c = patch_center(k, t)  [[r3(elem(c, 0) / WS), r3(elem(c, 1) / WS), r3(0.17 / WS)] | meadows(k + 1, t)] } }
 
 fun obst_pts(lst) { if (length(lst) == 0) { [] } else { o = hd(lst)  [[r3(hd(o) / WS), r3(nth(o, 1) / WS), r3(nth(o, 2) / WS)] | obst_pts(tl(lst))] } }
@@ -1291,10 +1436,11 @@ fun hist_sample(s, tick) {
 }
 
 fun flee_sample(tab, s) {
-    n = num(cget(tab, 'fl_n'))
-    fl = if (n > 0) { numf(cget(tab, 'fl_sum')) / to_float(n) } else { 0.0 }
-    cput(tab, 'fl_sum', 0.0)
-    cput(tab, 'fl_n', 0)
+    isl = g(s, 'isl')
+    n = num(cget(tab, k_isl + 501 + isl * 2))
+    fl = if (n > 0) { numf(cget(tab, k_isl + 500 + isl * 2)) / to_float(n) } else { 0.0 }
+    cput(tab, k_isl + 500 + isl * 2, 0.0)
+    cput(tab, k_isl + 501 + isl * 2, 0)
     pop = length(g(s, 'crs'))
     eaten = g(s, 'd_eaten') - num(g(s, 'eaten_mark'))
     [Math.round(fl * 1000.0), if (pop > 0) { Math.round(to_float(eaten) * 100000.0 / (to_float(pop) * 500.0)) } else { 0 }]
@@ -1323,6 +1469,13 @@ fun edges_of(innate, cur, dst) {
     else { e = hd(innate)  [[hd(e), dst, nth(e, 1), r2(nth(e, 2)), r2(nth(hd(cur), 2))] | edges_of(tl(innate), tl(cur), dst)] }
 }
 
+fun isl_sums(tab, k) { if (k >= n_isl) { [] } else { [list_or_empty(cget(tab, k_isl + 400 + k)) | isl_sums(tab, k + 1)] } }
+
+fun mini_rows(crs) { if (length(crs) == 0) { [] } else { c = hd(crs)  [[r3(g(c, 'x') / WS), r3(g(c, 'y') / WS), Math.round(nth(g(c, 'ph'), 6))] | mini_rows(tl(crs))] } }
+fun mini(s) {
+    LiveView.broadcast("evolve3", {'frame', json_encode(%{t: "ev", n: "mini", d: %{isl: g(s, 'isl'), cr: mini_rows(g(s, 'crs')), tick: g(s, 'tick')}})})
+}
+
 fun frame(tab, s, tick, left, sp) {
     st = swarm_stats()
     crs = g(s, 'crs')
@@ -1335,7 +1488,9 @@ fun frame(tab, s, tick, left, sp) {
     nn = count_neurons(crs, 0)
     nc = count_conns(crs, 0)
     LiveView.broadcast("evolve3", {'frame', json_encode(%{t: "ev", n: "frame", d: %{
-        tick: tick, cr: cr_rows(crs), sel: sel,
+        tick: tick, cr: cr_rows(crs), sel: sel, isl: g(s, 'isl'), isls: isl_sums(tab, 0), mig_in: g(s, 'mig_in'), mig_out: g(s, 'mig_out'),
+        ped: if (sc != nil && full) { ped(tab, g(sc, 'id'), 0, 0, 4) } else { nil },
+        sptree: if (tick % 60 == 0) { g(s, 'sptree') } else { nil },
         acts: if (sc != nil) { r2l(read_acts(tab, sel, 0, g(sc, 'nn'))) } else { [] },
         sens: if (sc != nil) { r2l(list_or_empty(g(sc, 'sv'))) } else { [] },
         net: if (sc != nil && full) { %{id: g(sc, 'id'), types: g(sc, 'types'), e: net_edges(tab, sc, 0, g(sc, 'inl'))} } else { nil },
@@ -1370,11 +1525,13 @@ fun inbox(tab) {
             cput(tab, k, 1 - num(cget(tab, k)))
             inbox(tab)
         {'cmd', c} ->
-            cput(tab, 'cmd', c)
+            cmd_all(tab, c, 0)
             inbox(tab)
         _o -> inbox(tab)
     }
 }
+
+fun cmd_all(tab, c, k) { if (k >= n_isl) { 'ok' } else { cput(tab, k_isl + 200 + k, c)  cmd_all(tab, c, k + 1) } }
 
 fun inbox_send(msg) {
     a = whereis('evolve3_in')
@@ -1394,7 +1551,8 @@ fun handle_event(name, value, assigns) {
     else { if (name == "save") { inbox_send({'cmd', 'save'}) }
     else { if (name == "load") { inbox_send({'cmd', 'load'}) }
     else { if (name == "reset") { inbox_send({'cmd', 'reset'}) }
-    else { 'noop' } } } } } } }
+    else { if (name == "view") { inbox_send({'set', 'view', to_int(map_get(value, 'i'))})  inbox_send({'set', 'sel_dirty', 1}) }
+    else { 'noop' } } } } } } } }
     assigns
 }
 
@@ -1433,7 +1591,7 @@ fun css() {
     ".ins{display:grid;grid-template-columns:1fr 1fr;gap:10px}" ++
     ".tile{border:1px solid var(--line);border-radius:11px;padding:11px 12px;background:#0d0d0d}.tile .v{font-size:22px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}.tile .t{font-size:12px;font-weight:600;margin-top:2px}.tile .d{font-size:11.5px;color:var(--mu);margin-top:3px;line-height:1.4}" ++
     ".sm{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}.sm .k{font-size:11.5px;color:var(--mu);display:flex;justify-content:space-between}.sm .k b{color:var(--tx);font-weight:600;font-variant-numeric:tabular-nums}.sm canvas{width:100%;height:46px;display:block;margin-top:4px}" ++
-    ".note{font-size:11px;color:var(--mu2);margin-top:8px}" ++
+    ".note{font-size:11px;color:var(--mu2);margin-top:8px}.isls{display:grid;grid-template-columns:1fr 1fr;gap:8px}.it{border:1px solid var(--line);border-radius:11px;padding:8px;cursor:pointer;background:#0b0b0b;transition:border-color .15s,background .15s}.it:hover{border-color:#3a3a3a}.it.on{border-color:#ededed;background:#111}.it canvas{width:100%;height:84px;display:block;border-radius:7px;background:#05070b;image-rendering:pixelated}.it .nm{font-size:12px;font-weight:600;margin-top:6px}.it .st{font-size:11px;color:var(--mu);margin-top:1px}" ++
     ".spr{display:grid;grid-template-columns:30px 1fr 60px;gap:10px;align-items:center;padding:5px 0;border-top:1px solid #141414;font-size:12px;cursor:pointer}.spr:first-child{border-top:0}.spr:hover{background:#0f0f0f}" ++
     ".spr canvas{width:30px;height:30px;image-rendering:pixelated}.spr .n{font-weight:600}.spr .r{color:var(--mu);font-size:11.5px}.bar{height:5px;border-radius:3px;background:#1a1a1a;overflow:hidden}.bar i{display:block;height:100%;border-radius:3px}" ++
     "#feed{font-size:12px;line-height:1.5;min-height:96px}.ev{display:flex;gap:9px;padding:2px 0;animation:in .3s ease}.ev i{width:7px;height:7px;border-radius:2px;margin-top:6px;flex:none}" ++
@@ -1455,7 +1613,7 @@ fun render(assigns) {
         css() ++
         "<header class=\"nav\"><div class=\"logo\">" ++
         "<svg width=\"20\" height=\"20\" viewBox=\"0 0 10 10\" shape-rendering=\"crispEdges\"><path fill=\"#50e3c2\" d=\"M3 1h4v1h1v1h1v4H8v1H7v1H3V8H2V7H1V3h1V2h1z\"/><path fill=\"#05060a\" d=\"M3 4h1v1H3zM6 4h1v1H6z\"/><path fill=\"#a78bfa\" d=\"M4 6h2v1H4z\"/></svg>" ++
-        "Evolution 3</div><span class=\"crumb\">brains and bodies evolved from scratch, no teacher</span>" ++
+        "Evolution 3</div><span class=\"crumb\">four islands of microbes evolving from scratch, no teacher</span>" ++
         "<div class=\"pill ml\"><span class=\"dot\"></span><span id=\"o-tps\">0</span> ticks/s &middot; <span id=\"o-procs\">0</span> neuron processes</div>" ++
         "<div class=\"pill\" id=\"o-ck\">checkpoint &ndash;</div></header>" ++
         "<div class=\"main\">" ++
@@ -1467,9 +1625,11 @@ fun render(assigns) {
         "<div class=\"tip\" id=\"tip\" sw-keep></div><div class=\"toast\" id=\"toast\" sw-keep></div></div>" ++
         "<div class=\"side\">" ++
         "<div class=\"pg\" id=\"pg-story\">" ++
-        "<div class=\"card\"><h3>What evolution found <span>live, from the whole population</span></h3><div class=\"ins\" id=\"ins\" sw-keep></div></div>" ++
+        "<div class=\"card\"><h3>Four islands <span>separate worlds, rare migrants between them</span></h3><div class=\"isls\" id=\"isls\" sw-keep></div></div>" ++
+        "<div class=\"card\"><h3>What evolution found <span id=\"ins-sub\">on this island</span></h3><div class=\"ins\" id=\"ins\" sw-keep></div></div>" ++
         "<div class=\"card\"><h3>The whole run <span id=\"run-span\">since this world began</span></h3><div class=\"sm\" id=\"sm\" sw-keep></div><div class=\"note\" id=\"run-note\" sw-keep></div></div>" ++
         "<div class=\"card\"><h3>Species alive <span>click one to inspect a member</span></h3><div id=\"spl\" sw-keep></div></div>" ++
+        "<div class=\"card\"><h3>Species tree <span>who split from whom, over time</span></h3><canvas id=\"tree-cv\" class=\"cvb\" style=\"height:170px\" sw-keep></canvas><p class=\"cap\">Each line is a species, from the moment it split off (joined to its parent) until it died out or now. Bold lines are alive.</p></div>" ++
         "<div class=\"card\"><h3>What just happened</h3><div id=\"feed\" sw-keep></div></div>" ++
         "<div class=\"card\"><h3>Experiment</h3><div class=\"btns\"><button class=\"btn on\" id=\"b-plast\">Learning: on</button>" ++
         "<button class=\"btn\" id=\"b-save\">Save checkpoint</button><button class=\"btn\" id=\"b-load\">Load checkpoint</button><button class=\"btn danger\" id=\"b-reset\">New random world</button></div>" ++
@@ -1480,6 +1640,7 @@ fun render(assigns) {
         "<div class=\"vit\" id=\"i-vit\" sw-keep></div></div>" ++
         "<div class=\"card\"><h3>Its brain <span id=\"i-bsub\"></span></h3><canvas id=\"brain-cv\" class=\"cvb\" style=\"height:300px\" sw-keep></canvas>" ++
         "<p class=\"cap\">Left: its <b>18 senses</b>. Right: its <b>5 actions</b>. Middle: neurons its genes grew. Lines are synapses (blue excites, red inhibits, dashed amber modulates learning, violet glow = changed by learning in this life). Dots moving along lines are messages between processes.</p></div>" ++
+        "<div class=\"card\"><h3>Its family tree <span id=\"i-fam\"></span></h3><canvas id=\"ped-cv\" class=\"cvb\" style=\"height:230px\" sw-keep></canvas><p class=\"cap\">Parents above, grandparents above them, four generations up. A creature that budded has a single parent. Faded ancestors are dead; the word under them says how they died.</p></div>" ++
         "<div class=\"card\"><h3>Its body genes</h3><div id=\"i-traits\" sw-keep></div></div>" ++
         "<div class=\"card\"><h3>Its two chromosomes <span id=\"i-par\"></span></h3><canvas id=\"gene-cv\" class=\"cvb\" style=\"height:190px\" sw-keep></canvas>" ++
         "<p class=\"cap\">One copy from each parent. Each band is a gene; brightness is its value, the white cap its dominance. A tick below marks a gene where the two copies differ (it is <b>heterozygous</b>): hidden variation that can show up in its children.</p></div>" ++
@@ -1489,20 +1650,21 @@ fun render(assigns) {
 }
 
 # if the world process ever dies (a panic), start a new one: it resumes from the last checkpoint
-fun watchdog(tab) {
-    cput(tab, 'hb', timestamp())
-    w = spawn(world_loop(tab, new_world()))
-    watch(tab, w)
+fun watchdog(tab, isl) {
+    cput(tab, k_isl + 100 + isl, timestamp())
+    w = spawn(world_loop(tab, new_world(isl)))
+    watch(tab, isl, w)
 }
 
-fun watch(tab, w) {
+fun watch(tab, isl, w) {
     sleep(2000)
-    if (timestamp() - num(cget(tab, 'hb')) > 15000) {
-        eprint("[evolve3] world stopped responding; restarting from the last checkpoint")
-        cput(tab, 'restarts', num(cget(tab, 'restarts')) + 1)
-        watchdog(tab)
-    } else { watch(tab, w) }
+    if (timestamp() - num(cget(tab, k_isl + 100 + isl)) > 20000) {
+        eprint("[evolve3] island " ++ to_string(isl) ++ " stopped responding; restarting it from its last checkpoint")
+        watchdog(tab, isl)
+    } else { watch(tab, isl, w) }
 }
+
+fun start_islands(tab, k) { if (k >= n_isl) { 'ok' } else { spawn(watchdog(tab, k))  start_islands(tab, k + 1) } }
 
 fun main() {
     tab = make_tables(ets_new(), 16)
@@ -1510,7 +1672,8 @@ fun main() {
     cput(tab, 'plast', 1)
     cput(tab, 'speed', 2)
     cput(tab, 'sel', 0 - 1)
-    spawn(watchdog(tab))
+    cput(tab, 'view', 0)
+    start_islands(tab, 0)
     register('evolve3_in', spawn(inbox(tab)))
     LiveView.start(4016, [
         {"/", %{
