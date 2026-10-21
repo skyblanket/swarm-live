@@ -40,7 +40,7 @@ let n_out = 5
 let n_sens = 22
 let n_loci = 19
 let cmax = 48
-let tick_ms = 30
+let tick_ms = 25
 let k_act = 100000
 let k_w = 200000
 let ck_dir = "checkpoints/evolve3"
@@ -1233,7 +1233,7 @@ fun step(tab, s) {
     s6a = if (tick % 40 == 0) { species_step(s5) } else { s5 }
     s6 = if (tick % 500 == 0) { p(p(s6a, 'hist', cap([app(hist_sample(s6a, tick), flee_sample(tab, s6a)) | g(s6a, 'hist')], 400)), 'eaten_mark', g(s6a, 'd_eaten')) } else { s6a }
     s7 = if (tick - g(s6, 'ck_tick') >= 4000) { save(s6, "latest.json") } else { s6 }
-    every = if (sp == 1) { 1 } else { if (sp == 2) { 3 } else { 12 } }
+    every = if (sp == 1) { 1 } else { if (sp == 2) { 1 } else { 3 } }
     emit = tick % every == 0
     if (emit) { frame(tab, s7, tick, left, sp) } else { 'skip' }
     spent = timestamp() - t0
@@ -1508,7 +1508,7 @@ fun main() {
     tab = make_tables(ets_new(), 16)
     cput(tab, 'pred_on', 1)
     cput(tab, 'plast', 1)
-    cput(tab, 'speed', 1)
+    cput(tab, 'speed', 2)
     cput(tab, 'sel', 0 - 1)
     spawn(watchdog(tab))
     register('evolve3_in', spawn(inbox(tab)))
