@@ -619,6 +619,46 @@ fun nearest_meat(lst, x, y, best) {
 }
 
 # one pass over the other creatures: nearest one, and the mean signal heard nearby
+# a compact tuple per creature, built once per tick, so the pairwise scans read tuple fields
+# instead of looking keys up in each creature's map
+fun mk_oth(crs, acc) {
+    if (length(crs) == 0) { acc }
+    else { c = hd(crs)  mk_oth(tl(crs), [{g(c, 'x'), g(c, 'y'), g(c, 'id'), g(c, 'sp'), power(c), g(c, 'sig'), g(c, 'bite'), g(c, 'ph')} | acc]) }
+}
+
+fun scan_oth(lst, x, y, id, best, sig, cnt) {
+    if (length(lst) == 0) { {best, if (cnt > 0) { sig / to_float(cnt) } else { 0.0 }} }
+    else {
+        o = hd(lst)
+        if (elem(o, 2) == id) { scan_oth(tl(lst), x, y, id, best, sig, cnt) }
+        else {
+            dx = elem(o, 0) - x
+            dy = elem(o, 1) - y
+            d2 = dx * dx + dy * dy
+            near = d2 < 0.0225
+            nb = if (best == nil || d2 < elem(best, 0)) { {d2, dx, dy, o} } else { best }
+            scan_oth(tl(lst), x, y, id, nb, if (near) { sig + elem(o, 5) } else { sig }, if (near) { cnt + 1 } else { cnt })
+        }
+    }
+}
+
+fun hunter_oth(lst, x, y, id, sp, mine, best) {
+    if (length(lst) == 0) { best }
+    else {
+        o = hd(lst)
+        ok = elem(o, 2) != id && elem(o, 3) != sp && elem(o, 4) > mine && hd(tl(tl(tl(elem(o, 7))))) >= 0.8
+        if (ok) {
+            dx = elem(o, 0) - x
+            dy = elem(o, 1) - y
+            d2 = dx * dx + dy * dy
+            hunter_oth(tl(lst), x, y, id, sp, mine, if (best == nil || d2 < elem(best, 0)) { {d2, dx, dy, o} } else { best })
+        } else { hunter_oth(tl(lst), x, y, id, sp, mine, best) }
+    }
+}
+
+# {d2, dx, dy, o} -> [d, dx, dy, o]
+fun unsq(b) { if (b == nil) { nil } else { [Math.sqrt(elem(b, 0)), elem(b, 1), elem(b, 2), elem(b, 3)] } }
+
 fun scan_crs(crs, c, best, sig, cnt) {
     if (length(crs) == 0) { {best, if (cnt > 0) { sig / to_float(cnt) } else { 0.0 }} }
     else {
@@ -691,18 +731,19 @@ fun senses(s, c) {
     sight = nth(ph, 4)
     pl = see(nearest_item(g(s, 'plants'), x, y, nil), sight, hx, hy)
     mt = see(nearest_meat(g(s, 'meat'), x, y, nil), sight, hx, hy)
-    sc = scan_crs(g(s, 'crs'), c, nil, 0.0, 0)
-    nb = elem(sc, 0)
+    oth = g(s, 'oth')
+    sc = scan_oth(oth, x, y, g(c, 'id'), nil, 0.0, 0)
+    nb = unsq(elem(sc, 0))
     cv = see(nb, sight, hx, hy)
     seen = nb != nil && hd(nb) <= sight
     o = if (nb == nil) { nil } else { nth(nb, 3) }
-    kin = if (seen) { fmax(0.0, 1.0 - body_dist(ph, g(o, 'ph'), 0) / 2.5) } else { 0.0 }
-    sz = if (seen) { nth(g(o, 'ph'), 0) - nth(ph, 0) } else { 0.0 }
-    osig = if (seen) { g(o, 'sig') } else { 0.0 }
-    hn = nearest_hunter(g(s, 'crs'), c, power(c), nil)
+    kin = if (seen) { fmax(0.0, 1.0 - body_dist(ph, elem(o, 7), 0) / 2.5) } else { 0.0 }
+    sz = if (seen) { hd(elem(o, 7)) - hd(ph) } else { 0.0 }
+    osig = if (seen) { elem(o, 5) } else { 0.0 }
+    hn = unsq(hunter_oth(oth, x, y, g(c, 'id'), g(c, 'sp'), power(c), nil))
     po = see(nearest_poison(g(s, 'poison'), x, y, nil), sight, hx, hy)
     pv = see(hn, sight * 1.3, hx, hy)
-    threat = if (hn == nil || hd(hn) > sight * 1.3) { 0.0 } else { if (g(nth(hn, 3), 'bite') == 1) { 1.0 } else { 0.5 } }
+    threat = if (hn == nil || hd(hn) > sight * 1.3) { 0.0 } else { if (elem(nth(hn, 3), 6) == 1) { 1.0 } else { 0.5 } }
     wa = 1.0 - fmin(wall_t(x, y, hx, hy), 0.25) / 0.25
     [1.0, hd(pl), nth(pl, 1), hd(mt), nth(mt, 1), hd(cv), nth(cv, 1), kin, sz, osig,
      hd(pv), nth(pv, 1), threat, wa, g(c, 'e') / 100.0, g(c, 'h') / 100.0, if (g(c, 'pain') > 0) { 1.0 } else { 0.0 }, elem(sc, 1),
@@ -789,7 +830,7 @@ fun flee_pass(tab, isl, all, crs) {
     if (length(crs) == 0) { 'ok' }
     else {
         c = hd(crs)
-        hn = nearest_hunter(all, c, power(c), nil)
+        hn = unsq(hunter_oth(all, g(c, 'x'), g(c, 'y'), g(c, 'id'), g(c, 'sp'), power(c), nil))
         sight = nth(g(c, 'ph'), 4) * 1.3
         if (hn != nil && hd(hn) < sight && hd(hn) > 0.0001) {
             vmax = 0.011 * nth(g(c, 'ph'), 1) + 0.000001
@@ -1094,7 +1135,7 @@ fun find_mate(crs, c, best) {
 fun pay_old(crs, id, cost, kid) { upd(crs, id, fun(c) { p(p(p(c, 'e', g(c, 'e') - cost), 'cool', 220), 'kids', g(c, 'kids') + kid) }) }
 
 fun breed(tab, world, s, ids) {
-    if (length(ids) == 0) { s }
+    if (length(ids) == 0 || length(g(s, 'crs')) >= g(s, 'cap')) { s }
     else {
         c = find_id(g(s, 'crs'), hd(ids))
         if (c == nil || g(c, 'cool') > 0) { breed(tab, world, s, tl(ids)) }
@@ -1385,15 +1426,18 @@ fun step(tab, s0x) {
     plast = num(cget(tab, 'plast'))
     s0 = p(s, 'pred_on', num(cget(tab, 'pred_on')))
     drain_acks()
-    crs0 = sense_all(s0, g(s0, 'crs'), plast, [])
+    s0o = p(s0, 'oth', mk_oth(g(s0, 'crs'), []))
+    crs0 = sense_all(s0o, g(s0, 'crs'), plast, [])
     left = wait_acks(count_neurons(crs0, 0), 0)
     crs1 = act_all(tab, crs0, [])
-    if (g(s, 'tick') % 4 == 0) { flee_pass(tab, isl, crs1, crs1) } else { 'x' }
+    if (g(s, 'tick') % 4 == 0) { flee_pass(tab, isl, mk_oth(crs1, []), crs1) } else { 'x' }
     s1 = feed_all(p(s0, 'crs', []), crs1, [])
     crs2 = fight(g(s1, 'crs'), g(s1, 'crs'))
     s2 = p(s1, 'crs', crs2)
     s3 = reap(tab, p(p(p(s2, 'crs', []), 'meat', age_meat(g(s2, 'meat'))), 'plants', grow_plants(g(s2, 'isl'), g(s2, 'plants'), g(s2, 'tick'))), map_vitals(g(s2, 'crs'), []), [])
-    s4a = breed(tab, self(), s3, ids_of(g(s3, 'crs')))
+    # a full island cannot take a child: skip mate search and meiosis entirely (they were most of the tick)
+    full_isl = length(g(s3, 'crs')) >= g(s3, 'cap') || length(g(s3, 'free')) == 0
+    s4a = if (full_isl) { s3 } else { breed(tab, self(), s3, ids_of(g(s3, 'crs'))) }
     tick = g(s4a, 'tick') + 1
     s4 = emigrate(tab, s4a, tick)
     # the Toxic Marsh (island 1) gets no random immigrants: only real migrants from the other islands,
