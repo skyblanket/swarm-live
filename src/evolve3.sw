@@ -1219,7 +1219,7 @@ fun tree_mark(tree, sid, tick) {
     else { r = hd(tree)  if (hd(r) == sid && nth(r, 4) == 0) { [[hd(r), nth(r, 1), nth(r, 2), nth(r, 3), tick] | tl(tree)] } else { [r | tree_mark(tl(tree), sid, tick)] } }
 }
 fun tree_seed(sps) { if (length(sps) == 0) { [] } else { r = hd(sps)  [[hd(r), 0, nth(r, 2), nth(r, 3), 0] | tree_seed(tl(sps))] } }
-fun fix_tree(l) { if (l == nil || length(l) == 0) { [] } else { [ints(hd(l)) | fix_tree(tl(l))] } }
+fun fix_tree(l) { if (l == nil) { [] } else { rev(fh_acc(l, []), []) } }
 
 fun species_step_unused(s) {
     s
@@ -1464,8 +1464,10 @@ fun flee_sample(tab, s) {
     [Math.round(fl * 1000.0), if (pop > 0) { Math.round(to_float(eaten) * 100000.0 / (to_float(pop) * 500.0)) } else { 0 }]
 }
 
-fun ints(l) { if (length(l) == 0) { [] } else { [to_int(hd(l)) | ints(tl(l))] } }
-fun fix_hist(l) { if (l == nil || length(l) == 0) { [] } else { [ints(hd(l)) | fix_hist(tl(l))] } }
+fun ints(l) { rev(ints_acc(l, []), []) }
+fun ints_acc(l, acc) { if (length(l) == 0) { acc } else { ints_acc(tl(l), [to_int(hd(l)) | acc]) } }
+fun fix_hist(l) { if (l == nil) { [] } else { rev(fh_acc(l, []), []) } }
+fun fh_acc(l, acc) { if (length(l) == 0) { acc } else { fh_acc(tl(l), [ints(hd(l)) | acc]) } }
 
 fun r2l(lst) { if (length(lst) == 0) { [] } else { [r2(hd(lst)) | r2l(tl(lst))] } }
 
@@ -1647,7 +1649,7 @@ fun render(assigns) {
         "<div class=\"card\"><h3>What evolution found <span id=\"ins-sub\">on this island</span></h3><div class=\"ins\" id=\"ins\" sw-keep></div></div>" ++
         "<div class=\"card\"><h3>The whole run <span id=\"run-span\">since this world began</span></h3><div class=\"sm\" id=\"sm\" sw-keep></div><div class=\"note\" id=\"run-note\" sw-keep></div></div>" ++
         "<div class=\"card\"><h3>Species alive <span>click one to inspect a member</span></h3><div id=\"spl\" sw-keep></div></div>" ++
-        "<div class=\"card\"><h3>Species tree <span>who split from whom, over time</span></h3><canvas id=\"tree-cv\" class=\"cvb\" style=\"height:170px\" sw-keep></canvas><p class=\"cap\">Each line is a species, from the moment it split off (joined to its parent) until it died out or now. Bold lines are alive.</p></div>" ++
+        "<div class=\"card\"><h3>Species tree <span>who split from whom, over time</span></h3><canvas id=\"tree-cv\" class=\"cvb\" style=\"height:170px\" sw-keep></canvas><p class=\"cap\">Each line is a species, until it died out or now; bold = alive. A branch joined to a parent line is a real split. A diamond is a species that arrived from outside (an immigrant or a migrant from another island).</p></div>" ++
         "<div class=\"card\"><h3>What just happened</h3><div id=\"feed\" sw-keep></div></div>" ++
         "<div class=\"card\"><h3>Experiment</h3><div class=\"btns\"><button class=\"btn on\" id=\"b-plast\">Learning: on</button>" ++
         "<button class=\"btn\" id=\"b-save\">Save checkpoint</button><button class=\"btn\" id=\"b-load\">Load checkpoint</button><button class=\"btn danger\" id=\"b-reset\">New random world</button></div>" ++

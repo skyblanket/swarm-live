@@ -182,7 +182,10 @@
   window.SwEvents = window.SwEvents || {};
   window.SwEvents.frame = function (d) {
     var now = performance.now(), i;
-    if (d.isl !== undefined && d.isl !== view_i) return;
+    if (d.isl !== undefined && d.isl !== view_i) {
+      if (now - switchT < 1500) return;          /* our switch is on its way */
+      adoptIsland(d.isl);                         /* another tab or a reload: follow the server */
+    }
     if (d.maps) maps = d.maps;
     if (d.obst && !bgc) makeBackground(d.obst);
     if (d.ws) WS = d.ws;
@@ -352,8 +355,11 @@
       if (m) for (var k = 0; k < m.cr.length; k++) { g.fillStyle = hsl(m.cr[k][2], 70, 58); g.fillRect(Math.round(m.cr[k][0] / 1000 * W) - 1, Math.round(m.cr[k][1] / 1000 * W) - 1, 2, 2); }
     }
   }
+  var switchT = 0;
+  function adoptIsland(i) { view_i = i; pos = {}; hist = []; sptree = []; net = null; kar = null; ped = null; bgc = null; vents = []; meadows = []; if (inspId) closeInsp(); }
   function switchIsland(i) {
     if (i === view_i) return;
+    switchT = performance.now();
     view_i = i; pos = {}; hist = []; sptree = []; net = null; kar = null; ped = null; last = null; bgc = null; vents = []; meadows = [];
     closeInsp(); window.swSend('view', { i: i });
     var f = $('feed'); if (f) f.innerHTML = '';
@@ -364,16 +370,26 @@
     var cv = $('tree-cv'); if (!cv || !last) return;
     var w = cv.clientWidth, h = cv.clientHeight; if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
     var g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
-    var rows = sptree.slice(0, 40).slice().reverse(); if (!rows.length) { g.fillStyle = '#5f5f5f'; g.font = '11px ui-sans-serif,-apple-system,sans-serif'; g.fillText('waiting for the first species to split...', 4, 16); return; }
-    var t0 = rows[0][3], t1 = last.tick, idx = {}, i;
-    for (i = 0; i < rows.length; i++) { if (rows[i][3] < t0) t0 = rows[i][3]; idx[rows[i][0]] = i; }
-    var X = function (t) { return 4 + (t - t0) / Math.max(1, t1 - t0) * (w - 44); }, Y = function (i) { return 6 + i * (h - 12) / Math.max(1, rows.length - 1); };
+    var t1 = last.tick, ids = {}, i;
+    for (i = 0; i < sptree.length; i++) ids[sptree[i][0]] = 1;
+    /* a species whose parent is a known species split off here; anything else arrived from outside */
+    var all = sptree.map(function (r) { return { r: r, split: !!ids[r[1]], life: (r[4] === 0 ? t1 : r[4]) - r[3] }; });
+    var keep = all.filter(function (x) { return x.r[4] === 0 || x.life >= 600; }), hidden = all.length - keep.length;
+    var rows = keep.slice(0, 32).reverse(), legend = $('tree-note');
+    if (!rows.length) { g.fillStyle = '#5f5f5f'; g.font = '11px ui-sans-serif,-apple-system,sans-serif'; g.textAlign = 'left'; g.fillText('waiting for the first species to split...', 4, 16); return; }
+    var t0 = rows[0].r[3], idx = {};
+    for (i = 0; i < rows.length; i++) { if (rows[i].r[3] < t0) t0 = rows[i].r[3]; idx[rows[i].r[0]] = i; }
+    var X = function (t) { return 8 + (t - t0) / Math.max(1, t1 - t0) * (w - 52); }, Y = function (i) { return 8 + i * (h - 26) / Math.max(1, rows.length - 1); };
     for (i = 0; i < rows.length; i++) {
-      var r = rows[i], alive = r[4] === 0, x0 = X(r[3]), x1 = X(alive ? t1 : r[4]), y = Y(i), col = hsl(r[2], 65, alive ? 58 : 40);
-      if (idx[r[1]] !== undefined) { g.strokeStyle = 'rgba(255,255,255,0.18)'; g.lineWidth = 1; g.beginPath(); g.moveTo(x0, Y(idx[r[1]])); g.lineTo(x0, y); g.stroke(); }
+      var r = rows[i].r, alive = r[4] === 0, x0 = X(r[3]), x1 = X(alive ? t1 : r[4]), y = Y(i), col = hsl(r[2], 65, alive ? 58 : 40);
+      if (rows[i].split && idx[r[1]] !== undefined) { g.strokeStyle = 'rgba(255,255,255,0.25)'; g.lineWidth = 1; g.beginPath(); g.moveTo(x0, Y(idx[r[1]])); g.lineTo(x0, y); g.stroke(); }
       g.strokeStyle = col; g.lineWidth = alive ? 3 : 1.2; g.beginPath(); g.moveTo(x0, y); g.lineTo(Math.max(x0 + 2, x1), y); g.stroke();
+      if (!rows[i].split) { g.fillStyle = col; g.beginPath(); g.moveTo(x0, y - 4); g.lineTo(x0 + 4, y); g.lineTo(x0, y + 4); g.lineTo(x0 - 4, y); g.closePath(); g.fill(); }
       if (alive) { g.fillStyle = col; g.font = '600 10px ui-sans-serif,-apple-system,sans-serif'; g.textAlign = 'left'; g.fillText('#' + r[0], x1 + 4, y + 3.5); }
     }
+    g.fillStyle = '#6b6b6b'; g.font = '10px ui-sans-serif,-apple-system,sans-serif'; g.textAlign = 'left';
+    var splits = keep.filter(function (x) { return x.split; }).length;
+    g.fillText(splits + ' real splits · ' + (keep.length - splits) + ' arrivals (diamond)' + (hidden ? ' · ' + hidden + ' short-lived arrivals hidden' : ''), 4, h - 2);
   }
 
   /* ---------- the family tree of the inspected creature ---------- */
