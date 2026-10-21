@@ -240,15 +240,18 @@ fun js() {
     "\n" ++
     "  var MINI = [{ n: 'Foraging', u: 'meals / 1000 ticks', k: 3, f: 100, c: [80, 227, 194], dp: 1 }, { n: 'Brain size', u: 'neurons', k: 4, f: 100, c: [90, 170, 255], dp: 1 },\n" ++
     "    { n: 'Attack', u: 'gene', k: 5, f: 100, c: [255, 90, 90], dp: 2 }, { n: 'Learning rate', u: 'gene', k: 6, f: 1000, c: [167, 139, 250], dp: 3 },\n" ++
-    "    { n: 'Population', u: 'alive', k: 2, f: 1, c: [237, 237, 237], dp: 0 }, { n: 'Species', u: 'alive', k: 9, f: 1, c: [255, 200, 90], dp: 0 }];\n" ++
+    "    { n: 'Population', u: 'alive', k: 2, f: 1, c: [237, 237, 237], dp: 0 }, { n: 'Species', u: 'alive', k: 9, f: 1, c: [255, 200, 90], dp: 0 },\n" ++
+    "    { n: 'Fleeing hunters', u: '(+1 away, 0 random)', k: 11, f: 1000, c: [120, 255, 140], dp: 2 }, { n: 'Eaten', u: 'per 1000 ticks per creature', k: 12, f: 100, c: [255, 90, 160], dp: 2 }];\n" ++
     "  function runCharts(d, nnb) {\n" ++
     "    var el = $('sm'); if (!el) return;\n" ++
     "    if (!el.children.length) el.innerHTML = MINI.map(function (m, i) { return '<div><div class=\"k\"><span>' + m.n + '</span><b id=\"mv' + i + '\"></b></div><canvas id=\"mc' + i + '\"></canvas></div>'; }).join('');\n" ++
     "    var live = [d.tick, d.maxgen, d.pop, d.forage, Math.round(nnb * 100), d.mean[3], d.mean[7], d.mean[0], d.mean[2], d.sps.filter(function (s) { return s[1] > 0; }).length, d.mean[5]];\n" ++
-    "    var series = hist.slice().reverse().concat([live]);\n" ++
+    "    var series = hist.slice().reverse();\n" ++
+    "    if (series.length && series[series.length - 1].length >= 13) { live = live.concat(series[series.length - 1].slice(11, 13)); series = series.concat([live]); }\n" ++
+    "    else series = series.concat([live]);\n" ++
     "    for (var i = 0; i < MINI.length; i++) {\n" ++
-    "      var m = MINI[i], vals = series.map(function (r) { return r[m.k] / m.f; }), cur = vals[vals.length - 1], first = vals[0];\n" ++
-    "      var mv = $('mv' + i); if (mv) { var dl = cur - first, arrow = vals.length < 2 || Math.abs(dl) < 1e-9 ? '' : (dl > 0 ? ' &uarr;' : ' &darr;'); mv.innerHTML = cur.toFixed(m.dp) + '<span style=\"color:#6b6b6b;font-weight:400\"> ' + m.u + arrow + '</span>'; }\n" ++
+    "      var m = MINI[i], vals = series.filter(function (r) { return r.length > m.k; }).map(function (r) { return r[m.k] / m.f; }), cur = vals[vals.length - 1], first = vals[0];\n" ++
+    "      var mv = $('mv' + i); if (mv && !vals.length) mv.innerHTML = '<span style=\"color:#6b6b6b;font-weight:400\">collecting</span>'; else if (mv) { var dl = cur - first, arrow = vals.length < 2 || Math.abs(dl) < 1e-9 ? '' : (dl > 0 ? ' &uarr;' : ' &darr;'); mv.innerHTML = cur.toFixed(m.dp) + '<span style=\"color:#6b6b6b;font-weight:400\"> ' + m.u + arrow + '</span>'; }\n" ++
     "      spark($('mc' + i), vals, m.c);\n" ++
     "    }\n" ++
     "    var rs = $('run-span'); if (rs && series.length > 1) rs.textContent = 'generation ' + fmtc(series[0][1]) + ' to ' + fmtc(d.maxgen);\n" ++

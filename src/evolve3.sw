@@ -503,10 +503,12 @@ fun patch_center(k, t) {
     {0.5 + 0.30 * Math.cos(a), 0.5 + 0.30 * Math.sin(a)}
 }
 
+# half the algae grows anywhere, half in wide drifting patches: spinning on the spot does not pay
 fun plant_pos(t, tries) {
     c = patch_center(rndi(6), t)
-    x = clampw(elem(c, 0) + gauss() * 0.07)
-    y = clampw(elem(c, 1) + gauss() * 0.07)
+    anywhere = rndf() < 0.5
+    x = if (anywhere) { 0.04 + rndf() * 0.92 } else { clampw(elem(c, 0) + gauss() * 0.13) }
+    y = if (anywhere) { 0.04 + rndf() * 0.92 } else { clampw(elem(c, 1) + gauss() * 0.13) }
     if (tries <= 0 || in_obstacle(x, y, obstacles()) == false) { [x, y, 0] } else { plant_pos(t, tries - 1) }
 }
 
@@ -706,9 +708,25 @@ fun act_one(tab, c) {
     thrust = fmax(0.0, nth(o, 1))
     sp = 0.85 * numf(g(c, 'v')) + 0.15 * 0.011 * nth(ph, 1) * thrust / (1.0 + 0.3 * nth(ph, 2))
     po = push_out(clampw(g(c, 'x') + elem(hh, 0) * sp), clampw(g(c, 'y') + elem(hh, 1) * sp), obstacles())
-    cost = 0.02 * thrust * thrust * nth(ph, 1) * nth(ph, 0)
+    cost = 0.02 * thrust * thrust * nth(ph, 1) * nth(ph, 0) + 0.012 * fabs(hd(o)) * nth(ph, 0)
     c1 = p(p(p(p(p(p(c, 'x', elem(po, 0)), 'y', elem(po, 1)), 'hx', elem(hh, 0)), 'hy', elem(hh, 1)), 'om', om), 'v', sp)
     p(p(p(p(p(c1, 'e', g(c1, 'e') - cost), 'outs', o), 'sig', nth(o, 3)), 'bite', if (nth(o, 2) > 0.3) { 1 } else { 0 }), 'mate', if (nth(o, 4) > 0.0) { 1 } else { 0 })
+}
+
+fun flee_pass(tab, all, crs) {
+    if (length(crs) == 0) { 'ok' }
+    else {
+        c = hd(crs)
+        hn = nearest_hunter(all, c, power(c), nil)
+        sight = nth(g(c, 'ph'), 4) * 1.3
+        if (hn != nil && hd(hn) < sight && hd(hn) > 0.0001) {
+            vmax = 0.011 * nth(g(c, 'ph'), 1) + 0.000001
+            f = clampf(numf(g(c, 'v')) / vmax, 0.0, 1.0) * (0.0 - (g(c, 'hx') * nth(hn, 1) + g(c, 'hy') * nth(hn, 2)) / hd(hn))
+            cput(tab, 'fl_sum', numf(cget(tab, 'fl_sum')) + f)
+            cput(tab, 'fl_n', num(cget(tab, 'fl_n')) + 1)
+        } else { 'x' }
+        flee_pass(tab, all, tl(crs))
+    }
 }
 
 fun act_all(tab, crs, acc) { if (length(crs) == 0) { acc } else { act_all(tab, tl(crs), [act_one(tab, hd(crs)) | acc]) } }
@@ -1146,6 +1164,7 @@ fun step(tab, s) {
     crs0 = sense_all(s0, g(s0, 'crs'), plast, [])
     left = wait_acks(count_neurons(crs0, 0), 0)
     crs1 = act_all(tab, crs0, [])
+    flee_pass(tab, crs1, crs1)
     s1 = feed_all(p(s0, 'crs', []), crs1, [])
     crs2 = fight(g(s1, 'crs'), g(s1, 'crs'))
     s2 = p(s1, 'crs', crs2)
@@ -1154,7 +1173,7 @@ fun step(tab, s) {
     tick = g(s4, 'tick') + 1
     s5 = if (length(g(s4, 'crs')) < 30 && tick % 30 == 0) { immigrate(tab, self(), s4) } else { s4 }
     s6a = if (tick % 40 == 0) { species_step(s5) } else { s5 }
-    s6 = if (tick % 500 == 0) { p(s6a, 'hist', cap([hist_sample(s6a, tick) | g(s6a, 'hist')], 400)) } else { s6a }
+    s6 = if (tick % 500 == 0) { p(p(s6a, 'hist', cap([app(hist_sample(s6a, tick), flee_sample(tab, s6a)) | g(s6a, 'hist')], 400)), 'eaten_mark', g(s6a, 'd_eaten')) } else { s6a }
     s7 = if (tick - g(s6, 'ck_tick') >= 4000) { save(s6, "latest.json") } else { s6 }
     every = if (sp == 1) { 1 } else { if (sp == 2) { 3 } else { 12 } }
     emit = tick % every == 0
@@ -1208,6 +1227,16 @@ fun hist_sample(s, tick) {
     crs = g(s, 'crs')
     [tick, g(s, 'maxgen'), length(crs), forage_of(crs), r2(mean_k(crs, 'nn')), r2(mean_ph(crs, 3)), Math.round(mean_ph(crs, 11) * 1000.0),
      r2(mean_ph(crs, 0)), r2(mean_ph(crs, 2)), length(g(s, 'sps')), r2(mean_ph(crs, 5))]
+}
+
+fun flee_sample(tab, s) {
+    n = num(cget(tab, 'fl_n'))
+    fl = if (n > 0) { numf(cget(tab, 'fl_sum')) / to_float(n) } else { 0.0 }
+    cput(tab, 'fl_sum', 0.0)
+    cput(tab, 'fl_n', 0)
+    pop = length(g(s, 'crs'))
+    eaten = g(s, 'd_eaten') - num(g(s, 'eaten_mark'))
+    [Math.round(fl * 1000.0), if (pop > 0) { Math.round(to_float(eaten) * 100000.0 / (to_float(pop) * 500.0)) } else { 0 }]
 }
 
 fun ints(l) { if (length(l) == 0) { [] } else { [to_int(hd(l)) | ints(tl(l))] } }
