@@ -473,7 +473,7 @@ fun make_creature(tab, world, s, ha, hb, slot, gen, sp, x, y, e, mom, dad) {
       types: types_of(ns), inl: in_lists(cs, ns, ns), pids: pids, nn: length(ns), nc: length(cs),
       x: x, y: y, hx: Math.cos(a), hy: Math.sin(a), e: e, h: 100.0, age: 0, life: 2200 + rndi(1400),
       cool: 160, acd: 0, kids: 0, kills: 0, eaten: 0, pain: 0, sig: 0.0, bite: 0, mate: 0, outs: [0.0, 0.0, 0.0, 0.0, 0.0],
-      sv: [], mom: mom, dad: dad, killer: 0, vk: g(s, 'vk')}
+      sv: [], mom: mom, dad: dad, killer: 0, vk: g(s, 'vk'), isl: g(s, 'isl')}
 }
 
 fun types_of(ns) { if (length(ns) == 0) { [] } else { [nth(hd(ns), 1) | types_of(tl(ns))] } }
@@ -488,12 +488,29 @@ fun founder_genome() {
 # ------------------------------------------------------------
 # World: plants grow in drifting patches, corpses become meat, two predators
 # ------------------------------------------------------------
-# a rock reef in one corner plus a few lone rocks
-fun obstacles() { [[1.20, 1.18, 0.07], [1.33, 1.28, 0.06], [1.17, 1.36, 0.05], [1.40, 1.12, 0.045], [1.29, 1.44, 0.045],
-                   [0.40, 0.45, 0.06], [1.10, 0.38, 0.05], [0.30, 1.30, 0.05]] }
+# every island has its own map
+#   0 Green Meadows   a rock reef in one corner, three small vents, a ring of six meadows
+#   1 Toxic Marsh     six big vents, a few rocks, four meadows squeezed between the vents
+#   2 Lean Waters     a maze of twelve boulders, one vent, three small meadows far apart
+#   3 Rich Shallows   open water, one tiny vent, eight meadows close together
+fun obstacles(i) {
+    if (i == 0) { [[1.20, 1.18, 0.07], [1.33, 1.28, 0.06], [1.17, 1.36, 0.05], [1.40, 1.12, 0.045], [1.29, 1.44, 0.045], [0.40, 0.45, 0.06], [1.10, 0.38, 0.05], [0.30, 1.30, 0.05]] }
+    else { if (i == 1) { [[0.80, 0.22, 0.05], [1.45, 0.80, 0.05], [0.15, 0.80, 0.05]] }
+    else { if (i == 2) { [[0.30, 0.30, 0.08], [0.80, 0.22, 0.07], [1.30, 0.30, 0.08], [0.22, 0.80, 0.07], [1.38, 0.80, 0.07], [0.30, 1.30, 0.08],
+                         [0.80, 1.38, 0.07], [1.30, 1.30, 0.08], [0.55, 0.55, 0.06], [1.05, 0.55, 0.06], [0.55, 1.05, 0.06], [1.05, 1.05, 0.06]] }
+    else { [[0.25, 1.35, 0.05], [1.35, 0.25, 0.05]] } } }
+}
 
 # toxic vents: standing in one burns health
-fun vents() { [[0.80, 0.80, 0.12], [1.36, 0.26, 0.10], [0.20, 0.62, 0.09]] }
+fun vents(i) {
+    if (i == 0) { [[0.80, 0.80, 0.12], [1.36, 0.26, 0.10], [0.20, 0.62, 0.09]] }
+    else { if (i == 1) { [[0.40, 0.40, 0.13], [1.20, 0.38, 0.12], [0.80, 0.80, 0.14], [0.38, 1.20, 0.12], [1.22, 1.22, 0.13], [0.80, 1.47, 0.08]] }
+    else { if (i == 2) { [[0.80, 0.80, 0.07]] }
+    else { [[1.42, 1.42, 0.05]] } } }
+}
+
+fun meadow_count(i) { nth([6, 4, 3, 8], i) }
+fun meadow_ring(i) { nth([0.31, 0.27, 0.38, 0.24], i) }
 
 fun toxicity(x, y, lst) {
     if (length(lst) == 0) { 0.0 }
@@ -519,37 +536,37 @@ fun in_obstacle(x, y, obs) {
 
 fun clampw(v) { clampf(v, 0.02, WS - 0.02) }
 
-fun patch_center(k, t) {
-    a = to_float(k) * 1.0472 + to_float(t) * 0.00002
-    {0.5 * WS + 0.31 * WS * Math.cos(a), 0.5 * WS + 0.31 * WS * Math.sin(a)}
+fun patch_center(i, k, t) {
+    a = to_float(k) * 6.2832 / to_float(meadow_count(i)) + to_float(t) * 0.00002
+    {0.5 * WS + meadow_ring(i) * WS * Math.cos(a), 0.5 * WS + meadow_ring(i) * WS * Math.sin(a)}
 }
 
 # half the algae grows anywhere, half in wide drifting patches: spinning on the spot does not pay
-fun plant_pos(t, tries) {
-    c = patch_center(rndi(6), t)
+fun plant_pos(i, t, tries) {
+    c = patch_center(i, rndi(meadow_count(i)), t)
     anywhere = rndf() < 0.35
     x = if (anywhere) { 0.04 + rndf() * (WS - 0.08) } else { clampw(elem(c, 0) + gauss() * 0.15) }
     y = if (anywhere) { 0.04 + rndf() * (WS - 0.08) } else { clampw(elem(c, 1) + gauss() * 0.15) }
-    if (tries <= 0 || in_obstacle(x, y, obstacles()) == false) { [x, y, 0] } else { plant_pos(t, tries - 1) }
+    if (tries <= 0 || in_obstacle(x, y, obstacles(i)) == false) { [x, y, 0] } else { plant_pos(i, t, tries - 1) }
 }
 
-fun init_plants(k, t) { ip_acc(k, t, []) }
-fun ip_acc(k, t, acc) { if (k <= 0) { acc } else { ip_acc(k - 1, t, [plant_pos(t, 10) | acc]) } }
+fun init_plants(i, k, t) { ip_acc(i, k, t, []) }
+fun ip_acc(i, k, t, acc) { if (k <= 0) { acc } else { ip_acc(i, k - 1, t, [plant_pos(i, t, 10) | acc]) } }
 
-fun free_pos(tries) {
+fun free_pos(i, tries) {
     x = 0.06 + rndf() * (WS - 0.12)
     y = 0.06 + rndf() * (WS - 0.12)
-    if (tries <= 0 || (in_obstacle(x, y, obstacles()) == false && toxicity(x, y, vents()) == 0.0)) { [x, y] } else { free_pos(tries - 1) }
+    if (tries <= 0 || (in_obstacle(x, y, obstacles(i)) == false && toxicity(x, y, vents(i)) == 0.0)) { [x, y] } else { free_pos(i, tries - 1) }
 }
 
 # poison algae: mostly around the vents, some anywhere
-fun poison_pos() {
-    v = nth(vents(), rndi(3))
+fun poison_pos(i) {
+    v = nth(vents(i), rndi(length(vents(i))))
     if (rndf() < 0.7) { [clampw(hd(v) + gauss() * nth(v, 2) * 1.6), clampw(nth(v, 1) + gauss() * nth(v, 2) * 1.6)] }
     else { [0.04 + rndf() * (WS - 0.08), 0.04 + rndf() * (WS - 0.08)] }
 }
-fun init_poison(k) { ipo_acc(k, []) }
-fun ipo_acc(k, acc) { if (k <= 0) { acc } else { ipo_acc(k - 1, [poison_pos() | acc]) } }
+fun init_poison(i, k) { ipo_acc(i, k, []) }
+fun ipo_acc(i, k, acc) { if (k <= 0) { acc } else { ipo_acc(i, k - 1, [poison_pos(i) | acc]) } }
 
 fun slots(k, hi) { if (k >= hi) { [] } else { [k | slots(k + 1, hi)] } }
 
@@ -559,7 +576,7 @@ fun isl_poison(i) { nth([30, 75, 20, 30], i) }
 fun isl_vk(i) { nth([1.0, 2.2, 1.0, 1.0], i) }
 
 fun new_world(isl) {
-    %{crs: [], plants: init_plants(isl_plants(isl), 0), meat: [], poison: init_poison(isl_poison(isl)),
+    %{crs: [], plants: init_plants(isl, isl_plants(isl), 0), meat: [], poison: init_poison(isl, isl_poison(isl)),
       preds: [], isl: isl, vk: isl_vk(isl), cap: isl_cap, sptree: [], mig_in: 0, mig_out: 0,
       free: slots(isl * max_slots, (isl + 1) * max_slots), next_id: isl * 10000000 + 1, tick: 0, init: 0,
       b_sex: 0, b_bud: 0, b_imm: 0, d_starve: 0, d_pred: 0, d_eaten: 0, d_old: 0, d_toxic: 0,
@@ -688,7 +705,7 @@ fun senses(s, c) {
     wa = 1.0 - fmin(wall_t(x, y, hx, hy), 0.25) / 0.25
     [1.0, hd(pl), nth(pl, 1), hd(mt), nth(mt, 1), hd(cv), nth(cv, 1), kin, sz, osig,
      hd(pv), nth(pv, 1), threat, wa, g(c, 'e') / 100.0, g(c, 'h') / 100.0, if (g(c, 'pain') > 0) { 1.0 } else { 0.0 }, elem(sc, 1),
-     hd(po), nth(po, 1), toxicity(x, y, vents()), toxicity(x + hx * 0.09, y + hy * 0.09, vents())]
+     hd(po), nth(po, 1), toxicity(x, y, vents(g(c, 'isl'))), toxicity(x + hx * 0.09, y + hy * 0.09, vents(g(c, 'isl')))]
 }
 
 # ------------------------------------------------------------
@@ -761,7 +778,7 @@ fun act_one(tab, c) {
     hh = rotate_h(g(c, 'hx'), g(c, 'hy'), om)
     thrust = fmax(0.0, nth(o, 1))
     sp = 0.85 * numf(g(c, 'v')) + 0.15 * 0.011 * nth(ph, 1) * thrust / (1.0 + 0.3 * nth(ph, 2))
-    po = push_out(clampw(g(c, 'x') + elem(hh, 0) * sp), clampw(g(c, 'y') + elem(hh, 1) * sp), obstacles())
+    po = push_out(clampw(g(c, 'x') + elem(hh, 0) * sp), clampw(g(c, 'y') + elem(hh, 1) * sp), obstacles(g(c, 'isl')))
     cost = 0.02 * thrust * thrust * nth(ph, 1) * nth(ph, 0) + 0.012 * fabs(hd(o)) * nth(ph, 0)
     c1 = p(p(p(p(p(p(c, 'x', elem(po, 0)), 'y', elem(po, 1)), 'hx', elem(hh, 0)), 'hy', elem(hh, 1)), 'om', om), 'v', sp)
     p(p(p(p(p(c1, 'e', g(c1, 'e') - cost), 'outs', o), 'sig', nth(o, 3)), 'bite', if (nth(o, 2) > 0.3) { 1 } else { 0 }), 'mate', if (nth(o, 4) > 0.0) { 1 } else { 0 })
@@ -803,13 +820,13 @@ fun eat_plants(lst, c, t, acc, ate) {
 }
 
 # eaten plants regrow somewhere in a patch once their timer runs out (once per tick)
-fun grow_plants(lst, t) { rev(grow_acc(lst, t, []), []) }
-fun grow_acc(lst, t, acc) {
+fun grow_plants(i, lst, t) { rev(grow_acc(i, lst, t, []), []) }
+fun grow_acc(i, lst, t, acc) {
     if (length(lst) == 0) { acc }
     else {
         it = hd(lst)
         tm = nth(it, 2)
-        grow_acc(tl(lst), t, [if (tm <= 0) { it } else { if (tm == 1) { plant_pos(t, 10) } else { [hd(it), nth(it, 1), tm - 1] } } | acc])
+        grow_acc(i, tl(lst), t, [if (tm <= 0) { it } else { if (tm == 1) { plant_pos(i, t, 10) } else { [hd(it), nth(it, 1), tm - 1] } } | acc])
     }
 }
 
@@ -832,7 +849,7 @@ fun eat_poison(lst, c, acc, hit) {
         dx = hd(it) - g(c, 'x')
         dy = nth(it, 1) - g(c, 'y')
         r = 0.022 + 0.01 * nth(g(c, 'ph'), 0)
-        if (hit == 0 && dx * dx + dy * dy < r * r) { eat_poison(tl(lst), c, [poison_pos() | acc], 1) }
+        if (hit == 0 && dx * dx + dy * dy < r * r) { eat_poison(tl(lst), c, [poison_pos(g(c, 'isl')) | acc], 1) }
         else { eat_poison(tl(lst), c, [it | acc], hit) }
     }
 }
@@ -951,7 +968,7 @@ fun vitals(c) {
     sz = nth(ph, 0)
     cost = 0.012 + 0.018 * sz * sz + 0.0016 * to_float(g(c, 'nn')) + 0.0004 * to_float(g(c, 'nc')) +
            0.006 * nth(ph, 2) + 0.005 * nth(ph, 3) + 0.02 * nth(ph, 4) + 0.03 * nth(ph, 11)
-    tox = toxicity(g(c, 'x'), g(c, 'y'), vents())
+    tox = toxicity(g(c, 'x'), g(c, 'y'), vents(g(c, 'isl')))
     regen = g(c, 'e') > 40.0 && g(c, 'h') < 100.0 && tox == 0.0
     c0 = if (tox > 0.0) { p(p(p(c, 'h', g(c, 'h') - 1.2 * tox * numf(g(c, 'vk'))), 'pain', 6), 'killer', 0 - 2) } else { c }
     vitals2(c0, cost, regen)
@@ -1109,7 +1126,7 @@ fun ids_of(crs) { if (length(crs) == 0) { [] } else { [g(hd(crs), 'id') | ids_of
 # immigrants keep a dying world going: a champion's genome (selfed) or a fresh random one
 fun immigrate(tab, world, s) {
     h = g(s, 'hof')
-    pos = free_pos(20)
+    pos = free_pos(g(s, 'isl'), 20)
     if (length(h) > 0 && rndf() < 0.7) {
         e = nth(h, rndi(length(h)))
         birth(tab, world, s, gamete(nth(e, 1), nth(e, 2), 1.0), gamete(nth(e, 1), nth(e, 2), 1.0), nth(e, 3), nth(e, 4), hd(pos), nth(pos, 1), 70.0, 0, 0, 3)
@@ -1133,14 +1150,14 @@ fun founders_from(tab, world, s, k, ancs) {
     if (k <= 0) { s }
     else {
         a = nth(ancs, k % length(ancs))
-        pos = free_pos(20)
+        pos = free_pos(g(s, 'isl'), 20)
         s1 = birth(tab, world, s, mutate_hap(a, 1.0), mutate_hap(a, 1.0), 0, 0, hd(pos), nth(pos, 1), 70.0, 0, 0, 3)
         founders_from(tab, world, s1, k - 1, ancs)
     }
 }
 fun immigrate_fresh(tab, world, s) {
     fg = founder_genome()
-    pos = free_pos(20)
+    pos = free_pos(g(s, 'isl'), 20)
     birth(tab, world, s, elem(fg, 0), elem(fg, 1), 0, 0, hd(pos), nth(pos, 1), 70.0, 0, 0, 3)
 }
 
@@ -1249,7 +1266,7 @@ fun load_crs(tab, world, s, lst) {
     if (length(lst) == 0) { s }
     else {
         e = hd(lst)
-        pos = free_pos(20)
+        pos = free_pos(g(s, 'isl'), 20)
         load_crs(tab, world, birth(tab, world, s, fix_hap(hd(e)), fix_hap(nth(e, 1)), to_int(nth(e, 2)), to_int(nth(e, 3)), hd(pos), nth(pos, 1), 70.0, 0, 0, 0), tl(lst))
     }
 }
@@ -1316,7 +1333,7 @@ fun world_loop(tab, s) {
 fun recv_migrants(tab, world, s) {
     receive {
         {'mig', ha, hb, gen, sp, from, fromid} ->
-            pos = free_pos(20)
+            pos = free_pos(g(s, 'isl'), 20)
             s1 = birth(tab, world, s, ha, hb, gen, sp, hd(pos), nth(pos, 1), 65.0, fromid, fromid, 4)
             arrived = length(g(s1, 'crs')) > length(g(s, 'crs'))
             recv_migrants(tab, world, if (arrived) { p(s1, 'evs', [[15, 0, Math.round(nth(g(hd(g(s1, 'crs')), 'ph'), 6)), gen, from, 0] | g(s1, 'evs')]) } else { s1 })
@@ -1364,7 +1381,7 @@ fun step(tab, s0x) {
     s1 = feed_all(p(s0, 'crs', []), crs1, [])
     crs2 = fight(g(s1, 'crs'), g(s1, 'crs'))
     s2 = p(s1, 'crs', crs2)
-    s3 = reap(tab, p(p(p(s2, 'crs', []), 'meat', age_meat(g(s2, 'meat'))), 'plants', grow_plants(g(s2, 'plants'), g(s2, 'tick'))), map_vitals(g(s2, 'crs'), []), [])
+    s3 = reap(tab, p(p(p(s2, 'crs', []), 'meat', age_meat(g(s2, 'meat'))), 'plants', grow_plants(g(s2, 'isl'), g(s2, 'plants'), g(s2, 'tick'))), map_vitals(g(s2, 'crs'), []), [])
     s4a = breed(tab, self(), s3, ids_of(g(s3, 'crs')))
     tick = g(s4a, 'tick') + 1
     s4 = emigrate(tab, s4a, tick)
@@ -1410,7 +1427,8 @@ fun mp_acc(lst, acc) { if (length(lst) == 0) { acc } else { it = hd(lst)  mp_acc
 fun pred_pts(lst) { if (length(lst) == 0) { [] } else { pr = hd(lst)  [[r3(hd(pr)), r3(nth(pr, 1)), nth(pr, 2), nth(pr, 3)] | pred_pts(tl(lst))] } }
 fun pois_pts(lst) { rev(po_acc(lst, []), []) }
 fun po_acc(lst, acc) { if (length(lst) == 0) { acc } else { it = hd(lst)  po_acc(tl(lst), [[r3(hd(it) / WS), r3(nth(it, 1) / WS)] | acc]) } }
-fun meadows(k, t) { if (k >= 6) { [] } else { c = patch_center(k, t)  [[r3(elem(c, 0) / WS), r3(elem(c, 1) / WS), r3(0.17 / WS)] | meadows(k + 1, t)] } }
+fun meadows(i, k, t) { if (k >= meadow_count(i)) { [] } else { c = patch_center(i, k, t)  [[r3(elem(c, 0) / WS), r3(elem(c, 1) / WS), r3(0.17 / WS)] | meadows(i, k + 1, t)] } }
+fun maps(k) { if (k >= n_isl) { [] } else { [[obst_pts(obstacles(k)), obst_pts(vents(k))] | maps(k + 1)] } }
 
 fun obst_pts(lst) { if (length(lst) == 0) { [] } else { o = hd(lst)  [[r3(hd(o) / WS), r3(nth(o, 1) / WS), r3(nth(o, 2) / WS)] | obst_pts(tl(lst))] } }
 
@@ -1498,8 +1516,8 @@ fun frame(tab, s, tick, left, sp) {
                                         an: [length(g(g(sc, 'ha'), 'n')), length(g(g(sc, 'ha'), 'c'))], bn: [length(g(g(sc, 'hb'), 'n')), length(g(g(sc, 'hb'), 'c'))],
                                         mom: g(sc, 'mom'), dad: g(sc, 'dad')} } else { nil },
         plants: plant_pts(g(s, 'plants')), meat: meat_pts(g(s, 'meat')), preds: [],
-        obst: if (tick % 30 == 0) { obst_pts(obstacles()) } else { nil }, vents: if (tick % 30 == 0) { obst_pts(vents()) } else { nil },
-        meadows: if (tick % 30 == 0) { meadows(0, tick) } else { nil }, poison: pois_pts(g(s, 'poison')), ws: WS,
+        obst: if (tick % 30 == 0 || full) { obst_pts(obstacles(g(s, 'isl'))) } else { nil }, vents: if (tick % 30 == 0 || full) { obst_pts(vents(g(s, 'isl'))) } else { nil },
+        meadows: if (tick % 30 == 0 || full) { meadows(g(s, 'isl'), 0, tick) } else { nil }, maps: if (tick % 60 == 0) { maps(0) } else { nil }, poison: pois_pts(g(s, 'poison')), ws: WS,
         pop: length(crs), maxgen: g(s, 'maxgen'), b_sex: g(s, 'b_sex'), b_bud: g(s, 'b_bud'), b_imm: g(s, 'b_imm'),
         d_starve: g(s, 'd_starve'), d_pred: g(s, 'd_pred'), d_eaten: g(s, 'd_eaten'), d_old: g(s, 'd_old'), d_toxic: num(g(s, 'd_toxic')),
         sps: sp_rows(g(s, 'sps'), crs),

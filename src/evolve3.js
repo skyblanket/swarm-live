@@ -26,6 +26,7 @@
   var tpsT = 0, tpsTick = 0, tps = 0, lastFrameT = 0, gap = 33, uiT = 0, toastT = 0, feedT = {};
   var sprites = {}, spriteN = 0, AW = 0, AH = 0, view = { s: 1, ox: 0, oy: 0, k: 1 };
   var pos = {}, predPos = [], hover = null, mouse = null, inspId = 0, view_i = 0, minis = {}, isls = [], sptree = [], ped = null, islT = 0;
+  var PAL = [[6, 10, 16], [12, 14, 9], [17, 17, 19], [4, 13, 20]], MEAD = ['rgba(40,120,80,0.55)', 'rgba(90,110,40,0.55)', 'rgba(70,100,85,0.40)', 'rgba(30,150,125,0.60)'], maps = null;
   var ISL = [{ n: 'Green Meadows', d: 'plenty of algae' }, { n: 'Toxic Marsh', d: 'strong vents, lots of poison' }, { n: 'Lean Waters', d: 'scarce food' }, { n: 'Rich Shallows', d: 'abundant food' }];
   var SENS = ['bias', 'plant dir', 'plant near', 'meat dir', 'meat near', 'other dir', 'other near', 'kinship', 'its size', 'its signal',
     'hunter dir', 'hunter near', 'hunter biting', 'wall ahead', 'energy', 'health', 'pain', 'heard', 'poison dir', 'poison near', 'toxic here', 'toxic ahead'];
@@ -61,8 +62,8 @@
     var g = bgc.getContext('2d'), img = g.createImageData(WP, WP), d = img.data, x, y, i;
     for (y = 0; y < WP; y++) for (x = 0; x < WP; x++) {
       i = (y * WP + x) * 4;
-      var n = hash(x, y), v = hash(x >> 4, y >> 4), base = 6 + Math.floor(v * 4), spark = n > 0.996 ? 16 : 0;
-      d[i] = base + spark * 0.6; d[i + 1] = base + 4 + spark; d[i + 2] = base + 10 + spark; d[i + 3] = 255;
+      var n = hash(x, y), v = hash(x >> 4, y >> 4), pal = PAL[view_i], b0 = Math.floor(v * 4), spark = n > 0.996 ? 16 : (view_i === 2 && n > 0.93 ? 5 : 0);
+      d[i] = pal[0] + b0 + spark * 0.6; d[i + 1] = pal[1] + b0 + spark; d[i + 2] = pal[2] + b0 + spark; d[i + 3] = 255;
     }
     for (var k = 0; k < (obst || []).length; k++) {
       var o = obst[k], cx = o[0] / 1000 * WP, cy = o[1] / 1000 * WP, r = o[2] / 1000 * WP;
@@ -181,6 +182,8 @@
   window.SwEvents = window.SwEvents || {};
   window.SwEvents.frame = function (d) {
     var now = performance.now(), i;
+    if (d.isl !== undefined && d.isl !== view_i) return;
+    if (d.maps) maps = d.maps;
     if (d.obst && !bgc) makeBackground(d.obst);
     if (d.ws) WS = d.ws;
     if (d.vents) vents = d.vents;
@@ -202,7 +205,6 @@
       if (!q) predPos[i] = { x0: px, y0: py, x1: px, y1: py, t: now };
       else { var u = clamp((now - q.t) / gap, 0, 1); q.x0 = q.x0 + (q.x1 - q.x0) * u; q.y0 = q.y0 + (q.y1 - q.y0) * u; q.x1 = px; q.y1 = py; q.t = now; }
     }
-    if (d.isl !== undefined && d.isl !== view_i) return;
     last = d;
     minis[d.isl] = { cr: d.cr.map(function (c) { return [c[4], c[5], c[3]]; }), tick: d.tick };
     if (d.isls) isls = d.isls;
@@ -341,14 +343,18 @@
       if (st && sm && sm.length) st.innerHTML = sm[1] + ' alive &middot; ' + sm[2] + ' species &middot; gen ' + fmtc(sm[3]);
       var cv = $('ic' + i); if (!cv) continue;
       var g = cv.getContext('2d'), W = cv.width, m = minis[i];
-      g.fillStyle = '#06080d'; g.fillRect(0, 0, W, W);
-      for (var v = 0; v < vents.length; v++) { g.fillStyle = 'rgba(150,60,200,' + (i === 1 ? 0.7 : 0.4) + ')'; g.beginPath(); g.arc(vents[v][0] / 1000 * W, vents[v][1] / 1000 * W, vents[v][2] / 1000 * W, 0, 6.2832); g.fill(); }
+      var pl = PAL[i]; g.fillStyle = 'rgb(' + (pl[0] + 2) + ',' + (pl[1] + 2) + ',' + (pl[2] + 2) + ')'; g.fillRect(0, 0, W, W);
+      var mp = maps && maps[i];
+      if (mp) {
+        for (var o = 0; o < mp[0].length; o++) { g.fillStyle = 'rgba(120,128,140,0.7)'; g.beginPath(); g.arc(mp[0][o][0] / 1000 * W, mp[0][o][1] / 1000 * W, mp[0][o][2] / 1000 * W, 0, 6.2832); g.fill(); }
+        for (var v = 0; v < mp[1].length; v++) { g.fillStyle = 'rgba(160,70,210,0.65)'; g.beginPath(); g.arc(mp[1][v][0] / 1000 * W, mp[1][v][1] / 1000 * W, mp[1][v][2] / 1000 * W, 0, 6.2832); g.fill(); }
+      }
       if (m) for (var k = 0; k < m.cr.length; k++) { g.fillStyle = hsl(m.cr[k][2], 70, 58); g.fillRect(Math.round(m.cr[k][0] / 1000 * W) - 1, Math.round(m.cr[k][1] / 1000 * W) - 1, 2, 2); }
     }
   }
   function switchIsland(i) {
     if (i === view_i) return;
-    view_i = i; pos = {}; hist = []; sptree = []; net = null; kar = null; ped = null; last = null;
+    view_i = i; pos = {}; hist = []; sptree = []; net = null; kar = null; ped = null; last = null; bgc = null; vents = []; meadows = [];
     closeInsp(); window.swSend('view', { i: i });
     var f = $('feed'); if (f) f.innerHTML = '';
   }
@@ -471,7 +477,7 @@
     if (bgc) g.drawImage(bgc, 0, 0); else { g.fillStyle = '#080a10'; g.fillRect(0, 0, WP, WP); }
     if (!d) return;
     for (i = 0; i < meadows.length; i++) {
-      var mr = meadows[i][2] / 1000 * WP, md = disc(mr, 'rgba(40,120,80,0.55)', 0.55, 'm' + Math.round(mr));
+      var mr = meadows[i][2] / 1000 * WP, md = disc(mr, MEAD[view_i], 0.55, 'm' + view_i + Math.round(mr));
       g.drawImage(md, Math.round(meadows[i][0] / 1000 * WP - md.width / 2), Math.round(meadows[i][1] / 1000 * WP - md.height / 2));
     }
     for (i = 0; i < vents.length; i++) {
@@ -513,7 +519,7 @@
     ag.font = '600 10px ui-sans-serif,-apple-system,sans-serif'; ag.textAlign = 'center';
     for (i = 0; i < vents.length; i++) { ag.fillStyle = 'rgba(214,140,255,0.75)'; ag.fillText('TOXIC VENT', SX(vents[i][0] / 1000), SY(vents[i][1] / 1000) + vents[i][2] / 1000 * view.s + 12); }
     for (i = 0; i < meadows.length; i++) { ag.fillStyle = 'rgba(110,230,170,0.35)'; ag.fillText('algae meadow', SX(meadows[i][0] / 1000), SY(meadows[i][1] / 1000) - meadows[i][2] / 1000 * view.s - 4); }
-    ag.fillStyle = 'rgba(190,200,215,0.45)'; ag.fillText('ROCK REEF', SX(1.28 / WS), SY(1.03 / WS));
+    ag.fillStyle = 'rgba(190,200,215,0.45)'; if (view_i === 0) ag.fillText('ROCK REEF', SX(1.28 / WS), SY(1.03 / WS)); if (view_i === 2) ag.fillText('BOULDER MAZE', SX(0.5), SY(0.5) + 34);
     var k = view.k, i;
     for (i = 0; i < last.preds.length && i < predPos.length; i++) {
       var pr = last.preds[i], q = predPos[i], u = clamp((now - q.t) / gap, 0, 1), x = SX(q.x0 + (q.x1 - q.x0) * u), y = SY(q.y0 + (q.y1 - q.y0) * u), mode = pr[2];
