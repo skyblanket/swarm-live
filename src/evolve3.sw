@@ -525,7 +525,7 @@ fun new_world() {
       preds: [[0.9, 0.9, 0, 200, 0.0 - 1.0, 0.0], [0.1, 0.1, 0, 300, 1.0, 0.0]],
       free: slots(0), next_id: 1, tick: 0, init: 0,
       b_sex: 0, b_bud: 0, b_imm: 0, d_starve: 0, d_pred: 0, d_eaten: 0, d_old: 0,
-      maxgen: 0, sps: [], sp_next: 1, hof: [], evs: [], ck_tick: 0, ck_note: "", pred_on: 1}
+      maxgen: 0, sps: [], sp_next: 1, hof: [], evs: [], ck_tick: 0, ck_note: "", pred_on: 1, hist: []}
 }
 
 # ---- senses: 18 numbers per creature ----
@@ -687,12 +687,13 @@ fun push_out(x, y, obs) {
 fun act_one(tab, c) {
     o = read_acts(tab, g(c, 'slot'), 0, n_out)
     ph = g(c, 'ph')
-    hh = rotate_h(g(c, 'hx'), g(c, 'hy'), 0.20 * hd(o))
+    om = 0.8 * numf(g(c, 'om')) + 0.2 * 0.16 * hd(o)
+    hh = rotate_h(g(c, 'hx'), g(c, 'hy'), om)
     thrust = fmax(0.0, nth(o, 1))
-    sp = 0.011 * nth(ph, 1) * thrust / (1.0 + 0.3 * nth(ph, 2))
+    sp = 0.85 * numf(g(c, 'v')) + 0.15 * 0.011 * nth(ph, 1) * thrust / (1.0 + 0.3 * nth(ph, 2))
     po = push_out(clampw(g(c, 'x') + elem(hh, 0) * sp), clampw(g(c, 'y') + elem(hh, 1) * sp), obstacles())
     cost = 0.02 * thrust * thrust * nth(ph, 1) * nth(ph, 0)
-    c1 = p(p(p(p(c, 'x', elem(po, 0)), 'y', elem(po, 1)), 'hx', elem(hh, 0)), 'hy', elem(hh, 1))
+    c1 = p(p(p(p(p(p(c, 'x', elem(po, 0)), 'y', elem(po, 1)), 'hx', elem(hh, 0)), 'hy', elem(hh, 1)), 'om', om), 'v', sp)
     p(p(p(p(p(c1, 'e', g(c1, 'e') - cost), 'outs', o), 'sig', nth(o, 3)), 'bite', if (nth(o, 2) > 0.3) { 1 } else { 0 }), 'mate', if (nth(o, 4) > 0.0) { 1 } else { 0 })
 }
 
@@ -817,7 +818,7 @@ fun pred_one(s, pr) {
             else { if (mode == 3) { if (tm <= 0) { if (d < 0.40) { 1 } else { 0 } } else { 3 } }
             else { if (mode == 1) { if (tm <= 0 || tg == nil || d > 0.45) { 2 } else { 1 } }
             else { if (tm <= 0) { 0 } else { 2 } } } }
-    tm2 = if (mode2 != mode) { if (mode2 == 3) { 55 } else { if (mode2 == 1) { 110 } else { if (mode2 == 2) { 170 } else { 60 } } } } else { tm - 1 }
+    tm2 = if (mode2 != mode) { if (mode2 == 3) { 55 } else { if (mode2 == 1) { 110 } else { if (mode2 == 2) { 120 } else { 40 } } } } else { tm - 1 }
     wh = rotate_h(nth(pr, 4), nth(pr, 5), (rndf() - 0.5) * 0.3)
     face = (mode2 == 1 || mode2 == 3) && tg != nil
     hx = if (face) { dx / d } else { elem(wh, 0) }
@@ -827,9 +828,9 @@ fun pred_one(s, pr) {
     ny = clampw(py + hy * speed)
     if (mode2 == 1 && tg != nil && d < 0.045) {
         tid = nth(tg, 1)
-        crs2 = upd(g(s, 'crs'), tid, fun(c) { p(p(p(p(p(c, 'h', g(c, 'h') - 45.0 / (1.0 + nth(g(c, 'ph'), 2))), 'pain', 10), 'killer', 0 - 1),
+        crs2 = upd(g(s, 'crs'), tid, fun(c) { p(p(p(p(p(c, 'h', g(c, 'h') - 70.0 / (1.0 + 0.6 * nth(g(c, 'ph'), 2))), 'pain', 10), 'killer', 0 - 1),
                                                 'x', clampw(g(c, 'x') + dx / d * 0.08)), 'y', clampw(g(c, 'y') + dy / d * 0.08)) })
-        {p(s, 'crs', crs2), [nx, ny, 2, 170, hx, hy]}
+        {p(s, 'crs', crs2), [nx, ny, 2, 120, hx, hy]}
     } else { {s, [nx, ny, mode2, tm2, hx, hy]} }
 }
 
@@ -1040,7 +1041,7 @@ fun save(s, name) {
     data = %{v: 3, tick: g(s, 'tick'), maxgen: g(s, 'maxgen'), sp_next: g(s, 'sp_next'),
              b_sex: g(s, 'b_sex'), b_bud: g(s, 'b_bud'), b_imm: g(s, 'b_imm'),
              d_starve: g(s, 'd_starve'), d_pred: g(s, 'd_pred'), d_eaten: g(s, 'd_eaten'), d_old: g(s, 'd_old'),
-             sps: g(s, 'sps'), hof: g(s, 'hof'), cr: ck_creatures(g(s, 'crs'))}
+             sps: g(s, 'sps'), hof: g(s, 'hof'), hist: g(s, 'hist'), cr: ck_creatures(g(s, 'crs'))}
     path = ck_dir ++ "/" ++ name
     file_atomic_write(path, json_encode(data))
     p(p(p(s, 'ck_tick', g(s, 'tick')), 'ck_note', name), 'evs', [[11, 0, 0, g(s, 'maxgen'), length(g(s, 'crs')), 0] | g(s, 'evs')])
@@ -1080,7 +1081,7 @@ fun load(tab, world, s, name) {
                   'b_sex', to_int(g(d, 'b_sex'))), 'b_bud', to_int(g(d, 'b_bud'))), 'b_imm', to_int(g(d, 'b_imm'))),
                   'd_starve', to_int(g(d, 'd_starve'))), 'd_pred', to_int(g(d, 'd_pred'))), 'd_eaten', to_int(g(d, 'd_eaten'))), 'd_old', to_int(g(d, 'd_old'))),
                   'sps', fix_sps(g(d, 'sps')))
-            w2 = p(p(p(w1, 'hof', fix_hof(g(d, 'hof'))), 'init', 1), 'ck_note', "resumed " ++ name)
+            w2 = p(p(p(p(w1, 'hof', fix_hof(g(d, 'hof'))), 'init', 1), 'ck_note', "resumed " ++ name), 'hist', fix_hist(g(d, 'hist')))
             w3 = load_crs(tab, world, w2, g(d, 'cr'))
             p(p(w3, 'ck_tick', g(w3, 'tick')), 'evs', [[12, 0, 0, g(w3, 'maxgen'), length(g(w3, 'crs')), 0] | g(w3, 'evs')])
         }
@@ -1131,7 +1132,8 @@ fun step(tab, s) {
     s4 = breed(tab, self(), s3, ids_of(g(s3, 'crs')))
     tick = g(s4, 'tick') + 1
     s5 = if (length(g(s4, 'crs')) < 30 && tick % 30 == 0) { immigrate(tab, self(), s4) } else { s4 }
-    s6 = if (tick % 40 == 0) { species_step(s5) } else { s5 }
+    s6a = if (tick % 40 == 0) { species_step(s5) } else { s5 }
+    s6 = if (tick % 500 == 0) { p(s6a, 'hist', cap([hist_sample(s6a, tick) | g(s6a, 'hist')], 400)) } else { s6a }
     s7 = if (tick - g(s6, 'ck_tick') >= 4000) { save(s6, "latest.json") } else { s6 }
     every = if (sp == 1) { 1 } else { if (sp == 2) { 3 } else { 12 } }
     emit = tick % every == 0
@@ -1177,6 +1179,18 @@ fun best_slot(crs, best) {
     if (length(crs) == 0) { if (best == nil) { -1 } else { g(best, 'slot') } }
     else { c = hd(crs)  best_slot(tl(crs), if (best == nil || g(c, 'kids') * 1000 + g(c, 'age') > g(best, 'kids') * 1000 + g(best, 'age')) { c } else { best }) }
 }
+
+fun forage_of(crs) { Math.round(sum_k(crs, 'eaten', 0.0) * 100000.0 / (sum_k(crs, 'age', 0.0) + 1.0)) }
+
+# [tick, generation, population, foraging*100, neurons per brain*100, attack*100, plasticity*1000, size*100, armor*100, species, diet*100]
+fun hist_sample(s, tick) {
+    crs = g(s, 'crs')
+    [tick, g(s, 'maxgen'), length(crs), forage_of(crs), r2(mean_k(crs, 'nn')), r2(mean_ph(crs, 3)), Math.round(mean_ph(crs, 11) * 1000.0),
+     r2(mean_ph(crs, 0)), r2(mean_ph(crs, 2)), length(g(s, 'sps')), r2(mean_ph(crs, 5))]
+}
+
+fun ints(l) { if (length(l) == 0) { [] } else { [to_int(hd(l)) | ints(tl(l))] } }
+fun fix_hist(l) { if (l == nil || length(l) == 0) { [] } else { [ints(hd(l)) | fix_hist(tl(l))] } }
 
 fun r2l(lst) { if (length(lst) == 0) { [] } else { [r2(hd(lst)) | r2l(tl(lst))] } }
 
@@ -1224,7 +1238,7 @@ fun frame(tab, s, tick, left, sp) {
         sps: sp_rows(g(s, 'sps'), crs),
         mean: [r2(mean_ph(crs, 0)), r2(mean_ph(crs, 1)), r2(mean_ph(crs, 2)), r2(mean_ph(crs, 3)), r2(mean_ph(crs, 4)), r2(mean_ph(crs, 5)),
                r2(mean_ph(crs, 10)), Math.round(mean_ph(crs, 11) * 1000.0), r2(mean_k(crs, 'nn')), r2(mean_k(crs, 'nc'))],
-        forage: Math.round(sum_k(crs, 'eaten', 0.0) * 100000.0 / (sum_k(crs, 'age', 0.0) + 1.0)),
+        forage: forage_of(crs), hist: if (tick % 60 == 0) { g(s, 'hist') } else { nil },
         nn: nn, nc: nc, procs: num(map_get(st, 'processes')), late: left,
         speed: sp, pred_on: g(s, 'pred_on'), plast: num(cget(tab, 'plast')),
         ck: g(s, 'ck_note'), ck_tick: g(s, 'ck_tick'), hof: length(g(s, 'hof')),
@@ -1278,44 +1292,49 @@ fun handle_info(msg, assigns) {
     assigns
 }
 
-fun stat(id, label) {
-    "<div class=\"card stat\"><div class=\"lbl\">" ++ label ++ "</div><div class=\"val\" id=\"v-" ++ id ++ "\">&ndash;</div><div class=\"chip\" id=\"d-" ++ id ++ "\"></div></div>"
-}
-
 fun css() {
     "<style>" ++
-    ":root{--bg:#000;--card:#0a0a0a;--line:#1f1f1f;--line2:#2e2e2e;--tx:#ededed;--mu:#8f8f8f;--blue:#3b9eff;--red:#ff4d4d;--green:#50e3c2;--amber:#f5a623;--violet:#a78bfa}" ++
+    ":root{--bg:#000;--card:#0a0a0a;--line:#1c1c1c;--line2:#2c2c2c;--tx:#ededed;--mu:#8f8f8f;--mu2:#5f5f5f;--red:#ff5a5a;--green:#50e3c2;--amber:#f5a623;--violet:#a78bfa;--blue:#5aa9ff}" ++
     "*{box-sizing:border-box}html,body{height:100%;background:var(--bg);color:var(--tx);margin:0}" ++
     "body{font-family:ui-sans-serif,-apple-system,'SF Pro Text',Inter,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden}" ++
     "#live-root{height:100%;display:flex;flex-direction:column}" ++
-    ".nav{height:52px;flex:none;display:flex;align-items:center;gap:14px;padding:0 22px;border-bottom:1px solid var(--line)}" ++
-    ".logo{display:flex;align-items:center;gap:10px;font-weight:600;font-size:14px}.crumb{color:var(--mu);font-size:13px}.crumb:before{content:'/';margin-right:14px;color:#3a3a3a}" ++
-    ".pill{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mu);padding:5px 11px;border:1px solid var(--line2);border-radius:99px;white-space:nowrap}.live{margin-left:auto}" ++
+    ".nav{height:52px;flex:none;display:flex;align-items:center;gap:14px;padding:0 20px;border-bottom:1px solid var(--line)}" ++
+    ".logo{display:flex;align-items:center;gap:10px;font-weight:600;font-size:14px;white-space:nowrap}.crumb{color:var(--mu);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.crumb:before{content:'/';margin-right:14px;color:#3a3a3a}" ++
+    ".pill{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mu);padding:5px 11px;border:1px solid var(--line2);border-radius:99px;white-space:nowrap}.ml{margin-left:auto}" ++
     ".dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 1.8s infinite}" ++
     "@keyframes pulse{70%{box-shadow:0 0 0 7px rgba(80,227,194,0)}100%{box-shadow:0 0 0 0 rgba(80,227,194,0)}}" ++
-    ".main{flex:1;min-height:0;padding:14px 22px 18px;display:flex;flex-direction:column;gap:12px}" ++
-    ".cards{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;flex:none}" ++
-    ".card{background:var(--card);border:1px solid var(--line);border-radius:12px}" ++
-    ".stat{padding:10px 13px;height:80px}.lbl{font-size:11.5px;color:var(--mu)}" ++
-    ".val{font-size:24px;font-weight:600;letter-spacing:-.03em;font-variant-numeric:tabular-nums;margin-top:2px}" ++
-    ".chip{font-size:10.5px;color:var(--mu);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.chip.up{color:var(--green)}.chip.bad{color:var(--red)}.chip.warn{color:var(--amber)}" ++
-    ".body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr) 300px;gap:12px}" ++
-    ".pane{position:relative;overflow:hidden;background:#05060a;min-height:0}.pane canvas{position:absolute;inset:0}" ++
-    ".ph{position:absolute;top:11px;left:13px;right:13px;font-size:12px;color:var(--mu);pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ph b{color:var(--tx)}" ++
-    ".mid{display:grid;grid-template-rows:minmax(0,1.25fr) minmax(0,1fr);gap:12px;min-height:0}" ++
-    ".col{display:flex;flex-direction:column;gap:10px;min-height:0;overflow:auto;scrollbar-width:none}" ++
-    ".col .card{padding:11px 13px;flex:none}.col h3{font-size:12px;font-weight:600;margin:0 0 8px;display:flex;justify-content:space-between;gap:8px}.col h3 span{color:var(--mu);font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" ++
-    ".chart{width:100%;height:84px;display:block}" ++
-    "#log{font:11.5px/1.5 ui-sans-serif,-apple-system,sans-serif;height:150px;overflow:hidden}" ++
-    ".ev{display:flex;gap:8px;padding:2px 0;animation:in .3s ease}.ev i{width:7px;height:7px;border-radius:2px;margin-top:5px;flex:none}" ++
-    "@keyframes in{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}" ++
-    ".row2{display:flex;gap:6px;margin-bottom:6px}.btn{flex:1;font:inherit;font-size:11.5px;font-weight:500;color:var(--tx);background:#111;border:1px solid var(--line2);border-radius:8px;padding:7px 6px;cursor:pointer;transition:background .12s,border-color .12s,transform .06s}" ++
-    ".btn:hover{background:#1a1a1a;border-color:#444}.btn:active{transform:scale(.97)}.btn.on{background:#e6e6e6;color:#06070a;border-color:#e6e6e6}" ++
-    ".btn.danger{color:#ff9a9a;border-color:#5b2020;background:#1a0b0b}.btn.danger:hover{background:#2a1010;border-color:var(--red)}" ++
-    ".how{font-size:11.5px;color:var(--mu);line-height:1.55;margin:0}.how b{color:var(--tx);font-weight:600}" ++
-    ".sp{display:flex;flex-wrap:wrap;gap:5px 10px;font-size:11px;color:var(--mu);margin-top:6px}.sp i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:-1px}" ++
-    ".toast{position:absolute;right:14px;bottom:12px;font-size:11.5px;padding:6px 10px;border-radius:8px;background:#0f1a17;border:1px solid #1d4d40;color:var(--green);opacity:0;transform:translateY(6px);transition:all .3s;pointer-events:none}.toast.show{opacity:1;transform:none}" ++
-    "@media(max-width:1180px){.cards{grid-template-columns:repeat(3,1fr)}.body{grid-template-columns:1fr}.mid{grid-template-rows:420px 300px}body{overflow:auto}#live-root{height:auto}.pane.world{height:560px}}" ++
+    ".main{flex:1;min-height:0;padding:14px 20px 16px;display:grid;grid-template-columns:minmax(0,1.5fr) minmax(360px,1fr);gap:14px}" ++
+    ".card{background:var(--card);border:1px solid var(--line);border-radius:14px}" ++
+    ".world{position:relative;overflow:hidden;background:#05070b}.world canvas{position:absolute;inset:0}" ++
+    ".hud{position:absolute;left:16px;top:14px;right:16px;display:flex;align-items:flex-start;gap:12px;pointer-events:none}" ++
+    ".head{font-size:13px;color:var(--mu);line-height:1.35}.head b{color:var(--tx);font-weight:600}.head .big{display:block;font-size:22px;color:var(--tx);font-weight:600;letter-spacing:-.02em}" ++
+    ".seg{margin-left:auto;display:flex;background:#0d0d0d;border:1px solid var(--line2);border-radius:9px;padding:2px;pointer-events:auto}" ++
+    ".seg button{font:inherit;font-size:12px;color:var(--mu);background:none;border:0;border-radius:7px;padding:5px 11px;cursor:pointer}.seg button.on{background:#ededed;color:#000}" ++
+    ".legend{position:absolute;left:16px;right:16px;bottom:12px;display:flex;flex-wrap:wrap;gap:6px 14px;font-size:11.5px;color:var(--mu);pointer-events:none}" ++
+    ".legend span{display:flex;align-items:center;gap:6px}.legend i{width:9px;height:9px;border-radius:2px;display:inline-block}" ++
+    ".tip{position:absolute;pointer-events:none;background:rgba(12,12,14,.94);border:1px solid var(--line2);border-radius:10px;padding:9px 11px;font-size:12px;line-height:1.45;opacity:0;transition:opacity .12s;min-width:170px;backdrop-filter:blur(6px)}.tip b{font-weight:600}.tip .r{color:var(--mu)}" ++
+    ".side{position:relative;min-height:0;overflow:hidden}" ++
+    ".pg{position:absolute;inset:0;overflow:auto;display:flex;flex-direction:column;gap:12px;transition:transform .28s cubic-bezier(.2,.8,.2,1),opacity .2s;scrollbar-width:none}" ++
+    ".pg.off{transform:translateX(24px);opacity:0;pointer-events:none}" ++
+    ".side .card{padding:14px 16px;flex:none}" ++
+    "h3{font-size:12.5px;font-weight:600;margin:0 0 10px;display:flex;justify-content:space-between;gap:8px}h3 span{color:var(--mu);font-weight:400}" ++
+    ".ins{display:grid;grid-template-columns:1fr 1fr;gap:10px}" ++
+    ".tile{border:1px solid var(--line);border-radius:11px;padding:11px 12px;background:#0d0d0d}.tile .v{font-size:22px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}.tile .t{font-size:12px;font-weight:600;margin-top:2px}.tile .d{font-size:11.5px;color:var(--mu);margin-top:3px;line-height:1.4}" ++
+    ".sm{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}.sm .k{font-size:11.5px;color:var(--mu);display:flex;justify-content:space-between}.sm .k b{color:var(--tx);font-weight:600;font-variant-numeric:tabular-nums}.sm canvas{width:100%;height:46px;display:block;margin-top:4px}" ++
+    ".note{font-size:11px;color:var(--mu2);margin-top:8px}" ++
+    ".spr{display:grid;grid-template-columns:30px 1fr 60px;gap:10px;align-items:center;padding:5px 0;border-top:1px solid #141414;font-size:12px;cursor:pointer}.spr:first-child{border-top:0}.spr:hover{background:#0f0f0f}" ++
+    ".spr canvas{width:30px;height:30px;image-rendering:pixelated}.spr .n{font-weight:600}.spr .r{color:var(--mu);font-size:11.5px}.bar{height:5px;border-radius:3px;background:#1a1a1a;overflow:hidden}.bar i{display:block;height:100%;border-radius:3px}" ++
+    "#feed{font-size:12px;line-height:1.5;min-height:96px}.ev{display:flex;gap:9px;padding:2px 0;animation:in .3s ease}.ev i{width:7px;height:7px;border-radius:2px;margin-top:6px;flex:none}" ++
+    "@keyframes in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}" ++
+    ".btns{display:flex;flex-wrap:wrap;gap:6px}.btn{font:inherit;font-size:12px;font-weight:500;color:var(--tx);background:#111;border:1px solid var(--line2);border-radius:8px;padding:7px 10px;cursor:pointer;transition:background .12s,border-color .12s,transform .06s}" ++
+    ".btn:hover{background:#1a1a1a;border-color:#444}.btn:active{transform:scale(.97)}.btn.on{background:#ededed;color:#000;border-color:#ededed}.btn.danger{color:#ff9a9a;border-color:#4a1d1d;background:#170a0a}" ++
+    ".ih{display:flex;gap:14px;align-items:center}.ih canvas{width:64px;height:64px;image-rendering:pixelated;border-radius:12px;background:#07090d;border:1px solid var(--line)}.ih .tt{font-size:18px;font-weight:600;letter-spacing:-.01em}.ih .st{font-size:12px;color:var(--mu);margin-top:2px}" ++
+    ".x{margin-left:auto;align-self:flex-start;font:inherit;font-size:12px;color:var(--mu);background:#111;border:1px solid var(--line2);border-radius:8px;padding:5px 10px;cursor:pointer}.x:hover{color:var(--tx)}" ++
+    ".vit{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}.vit div{font-size:11px;color:var(--mu)}.vit b{display:block;font-size:15px;color:var(--tx);font-weight:600;font-variant-numeric:tabular-nums}" ++
+    ".tr{display:grid;grid-template-columns:78px 1fr 40px;gap:8px;align-items:center;font-size:11.5px;color:var(--mu);margin:5px 0}.tr b{color:var(--tx);font-weight:500;text-align:right;font-variant-numeric:tabular-nums}" ++
+    ".cvb{width:100%;display:block}.cap{font-size:11.5px;color:var(--mu);line-height:1.5;margin:8px 0 0}.cap b{color:var(--tx);font-weight:600}" ++
+    ".toast{position:absolute;right:16px;bottom:40px;font-size:12px;padding:7px 11px;border-radius:9px;background:#0f1a17;border:1px solid #1d4d40;color:var(--green);opacity:0;transform:translateY(6px);transition:all .3s;pointer-events:none}.toast.show{opacity:1;transform:none}" ++
+    "@media(max-width:900px){.crumb{display:none}.nav .pill:last-child{display:none}}@media(max-width:1100px){body{overflow:auto}#live-root{height:auto}.main{grid-template-columns:1fr}.world{height:620px}.side{height:900px}}" ++
     "</style>"
 }
 
@@ -1324,28 +1343,36 @@ fun render(assigns) {
         css() ++
         "<header class=\"nav\"><div class=\"logo\">" ++
         "<svg width=\"20\" height=\"20\" viewBox=\"0 0 10 10\" shape-rendering=\"crispEdges\"><path fill=\"#50e3c2\" d=\"M3 1h4v1h1v1h1v4H8v1H7v1H3V8H2V7H1V3h1V2h1z\"/><path fill=\"#05060a\" d=\"M3 4h1v1H3zM6 4h1v1H6z\"/><path fill=\"#a78bfa\" d=\"M4 6h2v1H4z\"/></svg>" ++
-        "Evolution 3</div><span class=\"crumb\">evolved brains, diploid genes, no teacher</span>" ++
-        "<div class=\"pill live\"><span class=\"dot\"></span>live &middot; <span id=\"o-fps\">0</span> fps &middot; <span id=\"o-tps\">0</span> ticks/s</div>" ++
+        "Evolution 3</div><span class=\"crumb\">brains and bodies evolved from scratch, no teacher</span>" ++
+        "<div class=\"pill ml\"><span class=\"dot\"></span><span id=\"o-tps\">0</span> ticks/s &middot; <span id=\"o-procs\">0</span> neuron processes</div>" ++
         "<div class=\"pill\" id=\"o-ck\">checkpoint &ndash;</div></header>" ++
-        "<div class=\"main\"><div class=\"cards\">" ++
-        stat("pop", "Population") ++ stat("gen", "Generations") ++ stat("sp", "Species alive") ++
-        stat("procs", "Neuron processes") ++ stat("msgs", "Synapse messages / s") ++ stat("death", "Deaths") ++
-        "</div><div class=\"body\">" ++
-        "<div class=\"card pane world\" id=\"arena\"><canvas id=\"arena-cv\" sw-keep></canvas><div class=\"ph\" id=\"ah\" sw-keep>the world</div><div class=\"toast\" id=\"toast\" sw-keep></div></div>" ++
-        "<div class=\"mid\">" ++
-        "<div class=\"card pane\" id=\"brain\"><canvas id=\"brain-cv\" sw-keep></canvas><div class=\"ph\" id=\"bh\" sw-keep>click a creature to see its brain</div></div>" ++
-        "<div class=\"card pane\" id=\"gene\"><canvas id=\"gene-cv\" sw-keep></canvas><div class=\"ph\" id=\"gh\" sw-keep>its two copies of every gene</div></div>" ++
-        "</div><div class=\"col\">" ++
-        "<div class=\"card\"><h3>Species <span id=\"h-sp\"></span></h3><canvas id=\"sp-cv\" class=\"chart\" style=\"height:96px\" sw-keep></canvas><div class=\"sp\" id=\"sp-leg\" sw-keep></div></div>" ++
-        "<div class=\"card\"><h3>Evolving traits <span>population mean</span></h3><canvas id=\"tr-cv\" class=\"chart\" sw-keep></canvas><div class=\"sp\" id=\"tr-leg\" sw-keep></div></div>" ++
-        "<div class=\"card\"><h3>Life and death</h3><div id=\"log\" sw-keep></div></div>" ++
-        "<div class=\"card\"><h3>Controls</h3>" ++
-        "<div class=\"row2\"><button class=\"btn\" data-speed=\"1\">1x</button><button class=\"btn\" data-speed=\"2\">fast</button><button class=\"btn\" data-speed=\"3\">turbo</button></div>" ++
-        "<div class=\"row2\"><button class=\"btn on\" id=\"b-pred\">Predators: on</button><button class=\"btn on\" id=\"b-plast\">Learning: on</button></div>" ++
-        "<div class=\"row2\"><button class=\"btn\" id=\"b-save\">Save checkpoint</button><button class=\"btn\" id=\"b-load\">Load checkpoint</button></div>" ++
-        "<div class=\"row2\" style=\"margin-bottom:0\"><button class=\"btn danger\" id=\"b-reset\">New random world</button></div></div>" ++
-        "<div class=\"card\"><h3>What is real here</h3><p class=\"how\">No expert, no fitness function. Each brain is <b>built from the genome</b>: rate, spiking and modulatory neurons, every one a <b>swarmrt process</b>. Synapses learn in a lifetime by an <b>evolved rule</b> (not inherited). Genes are <b>diploid</b>: two copies, dominance, crossover, mutation. Mates must be genetically close, so <b>species</b> split. Every neuron and synapse costs energy. The world is saved to disk and resumes.</p></div>" ++
-        "</div></div></div>",
+        "<div class=\"main\">" ++
+        "<div class=\"card world\" id=\"arena\"><canvas id=\"arena-cv\" sw-keep></canvas>" ++
+        "<div class=\"hud\"><div class=\"head\" id=\"head\" sw-keep><span class=\"big\">Generation &ndash;</span>waiting for the world</div>" ++
+        "<div class=\"seg\"><button data-speed=\"1\">1x</button><button data-speed=\"2\">fast</button><button data-speed=\"3\">turbo</button></div></div>" ++
+        "<div class=\"legend\"><span><i style=\"background:#50e3c2\"></i>algae (food)</span><span><i style=\"background:#c4423f\"></i>meat (the dead)</span><span><i style=\"background:#ff3b3b\"></i>predator</span>" ++
+        "<span style=\"color:#6b6b6b\">microbe: spikes = attack &middot; grey plates = armor &middot; tail = speed &middot; eye = sight &middot; glow = signalling</span></div>" ++
+        "<div class=\"tip\" id=\"tip\" sw-keep></div><div class=\"toast\" id=\"toast\" sw-keep></div></div>" ++
+        "<div class=\"side\">" ++
+        "<div class=\"pg\" id=\"pg-story\">" ++
+        "<div class=\"card\"><h3>What evolution found <span>live, from the whole population</span></h3><div class=\"ins\" id=\"ins\" sw-keep></div></div>" ++
+        "<div class=\"card\"><h3>The whole run <span id=\"run-span\">since this world began</span></h3><div class=\"sm\" id=\"sm\" sw-keep></div><div class=\"note\" id=\"run-note\" sw-keep></div></div>" ++
+        "<div class=\"card\"><h3>Species alive <span>click one to inspect a member</span></h3><div id=\"spl\" sw-keep></div></div>" ++
+        "<div class=\"card\"><h3>What just happened</h3><div id=\"feed\" sw-keep></div></div>" ++
+        "<div class=\"card\"><h3>Experiment</h3><div class=\"btns\"><button class=\"btn on\" id=\"b-pred\">Predators: on</button><button class=\"btn on\" id=\"b-plast\">Learning: on</button>" ++
+        "<button class=\"btn\" id=\"b-save\">Save checkpoint</button><button class=\"btn\" id=\"b-load\">Load checkpoint</button><button class=\"btn danger\" id=\"b-reset\">New random world</button></div>" ++
+        "<p class=\"cap\">No fitness function and no teacher. A brain is <b>built from the genes</b>, one swarmrt process per neuron. Creatures that find food and mates leave children; the rest die. Genes come in <b>two copies</b> that cross over and mutate; synapses also learn during a life by a rule that itself evolves. Turn <b>Learning</b> off to test whether that rule matters.</p></div>" ++
+        "</div>" ++
+        "<div class=\"pg off\" id=\"pg-insp\">" ++
+        "<div class=\"card\"><div class=\"ih\"><canvas id=\"i-spr\" width=\"32\" height=\"32\" sw-keep></canvas><div><div class=\"tt\" id=\"i-title\" sw-keep>&ndash;</div><div class=\"st\" id=\"i-sub\" sw-keep></div></div><button class=\"x\" id=\"b-close\">Back</button></div>" ++
+        "<div class=\"vit\" id=\"i-vit\" sw-keep></div></div>" ++
+        "<div class=\"card\"><h3>Its brain <span id=\"i-bsub\"></span></h3><canvas id=\"brain-cv\" class=\"cvb\" style=\"height:300px\" sw-keep></canvas>" ++
+        "<p class=\"cap\">Left: its <b>18 senses</b>. Right: its <b>5 actions</b>. Middle: neurons its genes grew. Lines are synapses (blue excites, red inhibits, dashed amber modulates learning, violet glow = changed by learning in this life). Dots moving along lines are messages between processes.</p></div>" ++
+        "<div class=\"card\"><h3>Its body genes</h3><div id=\"i-traits\" sw-keep></div></div>" ++
+        "<div class=\"card\"><h3>Its two chromosomes <span id=\"i-par\"></span></h3><canvas id=\"gene-cv\" class=\"cvb\" style=\"height:190px\" sw-keep></canvas>" ++
+        "<p class=\"cap\">One copy from each parent. Each band is a gene; brightness is its value, the white cap its dominance. A tick below marks a gene where the two copies differ (it is <b>heterozygous</b>): hidden variation that can show up in its children.</p></div>" ++
+        "</div>" ++
+        "</div></div>",
         [])
 }
 
