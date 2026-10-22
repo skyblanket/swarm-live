@@ -579,7 +579,7 @@
   function openInsp(id) {
     var c = rowById(id); if (!c) return;
     inspId = id; net = null; kar = null; ped = null;
-    window.swSend('sel', { slot: c[0] });
+    window.swSend('sel', { slot: c[0], isl: view_i });
     $('pg-story').classList.add('off'); $('pg-insp').classList.remove('off');
     setTimeout(resize, 30);
     if (last) inspector(last);

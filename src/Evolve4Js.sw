@@ -596,7 +596,7 @@ fun part2() {
     "  function openInsp(id) {\n" ++
     "    var c = rowById(id); if (!c) return;\n" ++
     "    inspId = id; net = null; kar = null; ped = null;\n" ++
-    "    window.swSend('sel', { slot: c[0] });\n" ++
+    "    window.swSend('sel', { slot: c[0], isl: view_i });\n" ++
     "    $('pg-story').classList.add('off'); $('pg-insp').classList.remove('off');\n" ++
     "    setTimeout(resize, 30);\n" ++
     "    if (last) inspector(last);\n" ++

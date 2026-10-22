@@ -1783,12 +1783,13 @@ fun mini(s) {
 fun frame(tab, s, tick, left, sp) {
     st = swarm_stats()
     crs = g(s, 'crs')
-    want = num(cget(tab, 'sel'))
+    isl_f = g(s, 'isl')
+    want = num(cget(tab, k_isl + 700 + isl_f))
     sel = if (by_slot(crs, want) != nil) { want } else { best_slot(crs, nil) }
-    if (sel != want) { cput(tab, 'sel', sel) } else { 'x' }
+    if (sel != want) { cput(tab, k_isl + 700 + isl_f, sel) } else { 'x' }
     sc = if (sel >= 0) { by_slot(crs, sel) } else { nil }
-    full = tick % 15 == 0 || num(cget(tab, 'sel_dirty')) == 1
-    if (full) { cput(tab, 'sel_dirty', 0) } else { 'x' }
+    full = tick % 15 == 0 || num(cget(tab, k_isl + 800 + isl_f)) == 1
+    if (full) { cput(tab, k_isl + 800 + isl_f, 0) } else { 'x' }
     nn = count_neurons(crs, 0)
     nc = count_conns(crs, 0)
     LiveView.broadcast("evolve3", {'frame', json_encode(%{t: "ev", n: "frame", d: %{
@@ -1848,14 +1849,14 @@ fun mount(params) {
 }
 
 fun handle_event(name, value, assigns) {
-    if (name == "sel") { inbox_send({'set', 'sel', to_int(map_get(value, 'slot'))})  inbox_send({'set', 'sel_dirty', 1}) }
+    if (name == "sel") { si = to_int(num(map_get(value, 'isl')))  inbox_send({'set', k_isl + 700 + si, to_int(map_get(value, 'slot'))})  inbox_send({'set', k_isl + 800 + si, 1}) }
     else { if (name == "speed") { inbox_send({'set', 'speed', to_int(map_get(value, 'k'))}) }
     else { if (name == "pred") { inbox_send({'toggle', 'pred_on'}) }
     else { if (name == "plast") { inbox_send({'toggle', 'plast'}) }
     else { if (name == "save") { inbox_send({'cmd', 'save'}) }
     else { if (name == "load") { inbox_send({'cmd', 'load'}) }
     else { if (name == "reset") { inbox_send({'cmd', 'reset'}) }
-    else { if (name == "view") { inbox_send({'set', k_isl + 600 + to_int(map_get(value, 'i')), timestamp()})  if (map_get(value, 'fresh') != nil) { inbox_send({'set', 'sel_dirty', 1}) } else { 'x' } }
+    else { if (name == "view") { inbox_send({'set', k_isl + 600 + to_int(map_get(value, 'i')), timestamp()})  if (map_get(value, 'fresh') != nil) { inbox_send({'set', k_isl + 800 + to_int(map_get(value, 'i')), 1}) } else { 'x' } }
     else { 'noop' } } } } } } } }
     assigns
 }
