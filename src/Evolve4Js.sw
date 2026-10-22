@@ -492,7 +492,11 @@ fun part2() {
     "  /* ---------- the islands ---------- */\n" ++
     "  function nIsl() { return isls.length || 4; }\n" ++
     "  var envOf = []; function eo(i) { return envOf[i] !== undefined ? envOf[i] : i % 8; }\n" ++
-    "  function islName(i) { return ISL[eo(i)].n + (nIsl() > 8 ? ' ' + (Math.floor(i / 8) + 1) : ''); }\n" ++
+    "  function islName(i) {\n" ++
+    "    var same = envOf.length > 1 && envOf.every(function (e) { return e === envOf[0]; });\n" ++
+    "    if (same) return ISL[eo(i)].n + ' ' + (i + 1);\n" ++
+    "    return ISL[eo(i)].n + (nIsl() > 8 ? ' ' + (Math.floor(i / 8) + 1) : '');\n" ++
+    "  }\n" ++
     "  function islandTiles() {\n" ++
     "    var el = $('isls'); if (!el) return;\n" ++
     "    var n = nIsl();\n" ++
@@ -611,14 +615,14 @@ fun part2() {
     "    var tr = $('i-traits');\n" ++
     "    var bc = c[35] || [0, 0, 0, 0, 0];\n" ++
     "    if (tr) tr.innerHTML = '<p class=\"cap\" style=\"margin:0 0 8px\"><b>Body:</b> ' + (c[32] || 1) + ' nodes &middot; ' + bc[2] + ' fins, ' + bc[0] + ' spikes, ' + bc[1] + ' armor, ' + bc[3] + ' mouths &middot; ' + bc[4] + ' muscles &middot; mass ' + ((c[31] || 0) / 100).toFixed(1) + '</p>' +\n" ++
-    "      trait('scale', c[10], 30, 200, '#ffdc78', (c[10] / 100).toFixed(2)) + trait('rhythm', c[11], 30, 250, '#5ac8ff', (c[11] / 100).toFixed(2)) +\n" ++
-    "      trait('muscle', c[12], 0, 200, '#9aa8bc', (c[12] / 100).toFixed(2)) + trait('spike power', c[34] || 0, 0, 200, '#ff5a5a', String(c[34] || 0)) +\n" ++
-    "      trait('sight', c[33] || c[14], 5, 80, '#50e3c2', ((c[33] || c[14]) / 100).toFixed(2)) + trait('diet', c[15], 0, 100, '#ff9a50', c[15] < 35 ? 'plants' : c[15] > 65 ? 'meat' : 'both') +\n" ++
-    "      trait('learning', c[29], 0, 200, '#a78bfa', (c[29] / 1000).toFixed(3)) + trait('brain', c[26], 5, 24, '#5aa9ff', c[26] + ' n');\n" ++
     ""
 }
 
 fun part3() {
+    "      trait('scale', c[10], 30, 200, '#ffdc78', (c[10] / 100).toFixed(2)) + trait('rhythm', c[11], 30, 250, '#5ac8ff', (c[11] / 100).toFixed(2)) +\n" ++
+    "      trait('muscle', c[12], 0, 200, '#9aa8bc', (c[12] / 100).toFixed(2)) + trait('spike power', c[34] || 0, 0, 200, '#ff5a5a', String(c[34] || 0)) +\n" ++
+    "      trait('sight', c[33] || c[14], 5, 80, '#50e3c2', ((c[33] || c[14]) / 100).toFixed(2)) + trait('diet', c[15], 0, 100, '#ff9a50', c[15] < 35 ? 'plants' : c[15] > 65 ? 'meat' : 'both') +\n" ++
+    "      trait('learning', c[29], 0, 200, '#a78bfa', (c[29] / 1000).toFixed(3)) + trait('brain', c[26], 5, 24, '#5aa9ff', c[26] + ' n');\n" ++
     "    var bs = $('i-bsub'); if (bs) bs.textContent = c[26] + ' neurons, ' + c[27] + ' synapses';\n" ++
     "    var ip = $('i-par'); if (ip && kar) ip.innerHTML = kar.mom ? (kar.mom === kar.dad ? 'budded from #' + kar.mom : 'child of #' + kar.mom + ' &times; #' + kar.dad) : 'founder or immigrant';\n" ++
     "  }\n" ++
@@ -815,14 +819,14 @@ fun part3() {
     "      }\n" ++
     "    }\n" ++
     "    return R;\n" ++
-    "  }\n" ++
-    "\n" ++
-    "  function SX(u) { return view.ox + u * view.s; }\n" ++
-    "  function SY(u) { return view.oy + u * view.s; }\n" ++
     ""
 }
 
 fun part4() {
+    "  }\n" ++
+    "\n" ++
+    "  function SX(u) { return view.ox + u * view.s; }\n" ++
+    "  function SY(u) { return view.oy + u * view.s; }\n" ++
     "  function drawArena(now) {\n" ++
     "    ag.clearRect(0, 0, AW, AH);\n" ++
     "    drawSlide(now);\n" ++

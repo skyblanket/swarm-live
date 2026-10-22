@@ -475,7 +475,11 @@
   /* ---------- the islands ---------- */
   function nIsl() { return isls.length || 4; }
   var envOf = []; function eo(i) { return envOf[i] !== undefined ? envOf[i] : i % 8; }
-  function islName(i) { return ISL[eo(i)].n + (nIsl() > 8 ? ' ' + (Math.floor(i / 8) + 1) : ''); }
+  function islName(i) {
+    var same = envOf.length > 1 && envOf.every(function (e) { return e === envOf[0]; });
+    if (same) return ISL[eo(i)].n + ' ' + (i + 1);
+    return ISL[eo(i)].n + (nIsl() > 8 ? ' ' + (Math.floor(i / 8) + 1) : '');
+  }
   function islandTiles() {
     var el = $('isls'); if (!el) return;
     var n = nIsl();
