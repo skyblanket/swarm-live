@@ -772,6 +772,10 @@ fun part3() {
     "        col = edge ? (((x + y) & 1) ? '#f4f0e8' : '#3a0a10') : (d < R * 0.5 ? '#14040a' : '#7a1822');\n" ++
     "      } else if (type === 5) {\n" ++
     "        col = d < Math.max(1, R * 0.45) ? '#05060a' : (edge ? '#9aa4b8' : '#f2f6ff');\n" ++
+    "      } else if (type === 7) {\n" ++
+    "        col = edge ? '#3a1050' : (d < R * 0.4 ? '#7dff9a' : '#b45cf0');\n" ++
+    "      } else if (type === 8) {\n" ++
+    "        col = edge ? '#4a2208' : (d < R * 0.45 ? '#1a0a04' : '#ff9a3c');\n" ++
     "      } else { col = hsl(hue, 60, 55); }\n" ++
     "      g.fillStyle = col; g.fillRect(x, y, 1, 1);\n" ++
     "    }\n" ++
@@ -796,7 +800,7 @@ fun part3() {
     "      pixelLine(P[pi], P[i], tw, hsl(hue, 45, 26, 0.95));\n" ++
     "      pixelLine(P[pi], P[i], Math.max(view.k * 0.6, tw * 0.5), hsl(hue, 55, 44, 0.95));\n" ++
     "    }\n" ++
-    "    var order = [3, 0, 2, 4, 5, 6, 1];\n" ++
+    "    var order = [3, 0, 2, 4, 5, 8, 6, 7, 1];\n" ++
     "    ag.imageSmoothingEnabled = false;\n" ++
     "    for (var oi = 0; oi < order.length; oi++) {\n" ++
     "      var T = order[oi];\n" ++
@@ -815,14 +819,14 @@ fun part3() {
     "          ag.fillStyle = '#ffd8d0'; ag.fillRect(tipx - view.k * 0.4, tipy - view.k * 0.4, view.k * 0.8, view.k * 0.8);\n" ++
     "        } else {\n" ++
     "          var Rs = Math.max(1, Math.round(r / view.k * 2)), sp = nodeSprite(T, hue, Rs), sz = sp.width * view.k / 2;\n" ++
-    "          ag.drawImage(sp, x - sz / 2, y - sz / 2, sz, sz);\n" ++
-    "        }\n" ++
-    "      }\n" ++
-    "    }\n" ++
     ""
 }
 
 fun part4() {
+    "          ag.drawImage(sp, x - sz / 2, y - sz / 2, sz, sz);\n" ++
+    "        }\n" ++
+    "      }\n" ++
+    "    }\n" ++
     "    return R;\n" ++
     "  }\n" ++
     "\n" ++

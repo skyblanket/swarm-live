@@ -17,7 +17,7 @@
   var TASKS = [
     { name: 'Swim to the light', sub: 'each pellet appears far away and drifts; it is sensed exactly like food', unit: 'pellets' },
     { name: 'Hunt', sub: 'the prey is evolved too, by its own population, scored on escaping', unit: 'caught' },
-    { name: 'Fight', sub: 'a duel with its pool’s runner-up: spikes wound, armor protects (3× health)', unit: 'score' }
+    { name: 'Fight', sub: 'a duel: spikes wound (max 25), stingers poison, jets lunge, armor protects; hits knock back', unit: 'score' }
   ];
   var st = [null, null, null], trails = [[], [], []], cams = [null, null, null], preyPrev = null;
   var champ = null, stats = null;
@@ -73,6 +73,13 @@
       var bd = d.b[i][1], B = d.b[i];
       if (!trails[t][i]) trails[t][i] = [];
       trails[t][i].push([bd[3] / 1000, bd[4] / 1000]); if (trails[t][i].length > 220) trails[t][i].shift();
+      /* jet flame while it lunges, venom bubbling off a poisoned body */
+      if (B[8] > 0) for (var nj = 0; nj < bd.length / 5; nj++) if (bd[nj * 5] === 8) {
+        var pj = bd[nj * 5 + 2], jx = bd[nj * 5 + 3], jy = bd[nj * 5 + 4], dxj = 0, dyj = 0;
+        if (pj >= 0) { dxj = jx - bd[pj * 5 + 3]; dyj = jy - bd[pj * 5 + 4]; var lj = Math.sqrt(dxj * dxj + dyj * dyj) || 1; dxj /= lj; dyj /= lj; }
+        for (var q2 = 0; q2 < 4; q2++) parts[t].push({ x: jx / 1000, y: jy / 1000, vx: dxj * 0.003 + (Math.random() - 0.5) * 0.001, vy: dyj * 0.003 + (Math.random() - 0.5) * 0.001, age: 0, life: 12 + Math.random() * 10, col: Math.random() < 0.5 ? [255, 160, 60] : [255, 230, 120], sz: 2 });
+      }
+      if (B[7] > 0 && Math.random() < 0.5) parts[t].push({ x: bd[3] / 1000 + (Math.random() - 0.5) * 0.02, y: bd[4] / 1000 + (Math.random() - 0.5) * 0.02, vx: 0, vy: -0.0004, age: 0, life: 30, col: [125, 255, 150], sz: Math.random() < 0.3 ? 2 : 1 });
       /* bubbles from fins and the core while it swims */
       var th = Math.abs(B[4]) / 100;
       for (var ni = 0; ni < bd.length / 5; ni++) {
@@ -133,7 +140,7 @@
   }
 
   /* ---------- a creature, in pixels. look = [x, y] it is looking at (eyes follow it), or null ---------- */
-  function drawCreature(g, bd, hue, P, s, look, now, bite) {
+  function drawCreature(g, bd, hue, P, s, look, now, bite, boost) {
     var n = P.length, i;
     var rp = function (i) { return Math.max(1, bd[i * 5 + 1] / 10000 / WS * s); };
     var OUT = hsl(hue, 60, 9), MID = hsl(hue, 55, 40), LIT = hsl(hue, 70, 62);
@@ -154,6 +161,19 @@
       ellipse(g, P[i][0], P[i][1], u[0], u[1], r * 2.4 + 1, r * (1.0 + fl) + 1, hsl(hue + 40, 70, 30, 0.9));
       ellipse(g, P[i][0], P[i][1], u[0], u[1], r * 2.4, r * (1.0 + fl), hsl(hue + 40, 80, 64, 0.75));
       ellipse(g, P[i][0] - u[0] * r * 0.6, P[i][1] - u[1] * r * 0.6, u[0], u[1], r * 1.2, r * 0.35, hsl(hue + 40, 90, 85, 0.6));
+    }
+    /* jets: an orange nozzle pointing out along its limb, flaming while it fires */
+    for (i = 0; i < n; i++) if (bd[i * 5] === 8) {
+      var dj = dirOf(i), Rj = rp(i);
+      if (boost > 0) {
+        var fl2 = Rj * (2.5 + Math.random() * 1.5);
+        tri(g, [P[i][0] - dj[1] * Rj, P[i][1] + dj[0] * Rj], [P[i][0] + dj[0] * fl2 * 1.6, P[i][1] + dj[1] * fl2 * 1.6], [P[i][0] + dj[1] * Rj, P[i][1] - dj[0] * Rj], '#ff8a2a');
+        tri(g, [P[i][0] - dj[1] * Rj * 0.5, P[i][1] + dj[0] * Rj * 0.5], [P[i][0] + dj[0] * fl2, P[i][1] + dj[1] * fl2], [P[i][0] + dj[1] * Rj * 0.5, P[i][1] - dj[0] * Rj * 0.5], '#ffe27a');
+      }
+      disc(g, P[i][0], P[i][1], Rj + 1, '#2a1204');
+      disc(g, P[i][0], P[i][1], Rj, '#ff9a3c');
+      disc(g, P[i][0] - Rj * 0.3, P[i][1] - Rj * 0.3, Rj * 0.45, '#ffc98a');
+      disc(g, P[i][0] + dj[0] * Rj * 0.5, P[i][1] + dj[1] * Rj * 0.5, Math.max(0.6, Rj * 0.45), '#1a0a04');
     }
     var order = [0, 2, 4, 5, 6];
     for (var oi = 0; oi < order.length; oi++) {
@@ -189,6 +209,16 @@
           g.fillStyle = '#ffffff'; g.fillRect(Math.round(x - R * 0.4), Math.round(y - R * 0.45), 1, 1);
         }
       }
+    }
+    /* stingers: violet curved barbs with a venom drop at the tip */
+    for (i = 0; i < n; i++) if (bd[i * 5] === 7) {
+      var ds = dirOf(i), Rs2 = rp(i) + 0.5, sx2 = -ds[1], sy2 = ds[0], bx2 = P[i][0], by2 = P[i][1];
+      var tip2 = [bx2 + ds[0] * Rs2 * 2.6 + sx2 * Rs2 * 0.9, by2 + ds[1] * Rs2 * 2.6 + sy2 * Rs2 * 0.9];
+      tri(g, [bx2 + sx2 * (Rs2 + 1), by2 + sy2 * (Rs2 + 1)], [tip2[0] + ds[0], tip2[1] + ds[1]], [bx2 - sx2 * (Rs2 + 1), by2 - sy2 * (Rs2 + 1)], '#2a0a3a');
+      tri(g, [bx2 + sx2 * Rs2, by2 + sy2 * Rs2], tip2, [bx2 - sx2 * Rs2, by2 - sy2 * Rs2], '#b45cf0');
+      tri(g, [bx2 + sx2 * Rs2 * 0.3, by2 + sy2 * Rs2 * 0.3], tip2, [bx2, by2], '#dca8ff');
+      g.fillStyle = '#7dff9a'; g.fillRect(Math.round(tip2[0]), Math.round(tip2[1]), 1, 1);
+      if ((now / 400 + i) % 2 < 1) g.fillRect(Math.round(tip2[0] + ds[0] * 2), Math.round(tip2[1] + ds[1] * 2 + 1), 1, 1);
     }
     /* spikes on top: blades pointing out along their limb */
     for (i = 0; i < n; i++) if (bd[i * 5] === 1) {
@@ -335,7 +365,8 @@
         for (i = 0; i < bd.length / 5; i++) P.push([SX(bd[i * 5 + 3] / 1000), SY(bd[i * 5 + 4] / 1000)]);
         var lk = look;
         if (t >= 1 && d.b.length > 1) { var o = d.b[1 - bi][1]; lk = [SX(o[3] / 1000), SY(o[4] / 1000)]; }
-        drawCreature(g, bd, B[0], P, s, lk, now, B[6] / 100);
+        drawCreature(g, bd, B[0], P, s, lk, now, B[6] / 100, B[8] || 0);
+        if (B[7] > 0) { g.fillStyle = 'rgba(125,255,150,0.5)'; for (var vv = 0; vv < P.length; vv++) if ((vv + Math.floor(now / 120)) % 3 === 0) g.fillRect(Math.round(P[vv][0]), Math.round(P[vv][1]) - 1, 1, 1); }
       }
       /* particles: bubbles rise and fade, bursts fly out */
       var ps = parts[t];
@@ -437,15 +468,15 @@
     for (i = 0; i < n; i++) { var x = bd[i * 5 + 3], y = bd[i * 5 + 4]; mnx = Math.min(mnx, x); mxx = Math.max(mxx, x); mny = Math.min(mny, y); mxy = Math.max(mxy, y); }
     var span = Math.max(mxx - mnx, mxy - mny, 20) / 1000, s = bw * 0.6 / span, P = [];
     for (i = 0; i < n; i++) P.push([bw / 2 + ((bd[i * 5 + 3] - (mnx + mxx) / 2) / 1000) * s, bh / 2 + ((bd[i * 5 + 4] - (mny + mxy) / 2) / 1000) * s]);
-    drawCreature(g, bd, B[0], P, s, [bw / 2 + 20, bh / 2], performance.now(), 0);
+    drawCreature(g, bd, B[0], P, s, [bw / 2 + 20, bh / 2], performance.now(), 0, 0);
     G.imageSmoothingEnabled = false; G.clearRect(0, 0, W, H); G.drawImage(cbuf.cv, 0, 0, W, H);
-    var cnt = [0, 0, 0, 0, 0, 0, 0]; for (i = 0; i < n; i++) cnt[bd[i * 5]]++;
+    var cnt = [0, 0, 0, 0, 0, 0, 0, 0, 0]; for (i = 0; i < n; i++) cnt[bd[i * 5]]++;
     $('c-title').textContent = 'Pool ' + (champ.k + 1) + ' champion';
     $('c-st').textContent = 'genome #' + champ.id + ' · lineage generation ' + fmtc(champ.gen);
     $('c-sub').textContent = 'running its three trials live';
     var kv = [['light', (champ.sc[0] / 100).toFixed(2)], ['chase', (champ.sc[1] / 100).toFixed(2)], ['fight', (champ.sc[2] / 100).toFixed(1)],
       ['neurons', champ.nn], ['synapses', champ.nc], ['body parts', n],
-      ['fins', cnt[3]], ['spikes', cnt[1]], ['mouths', cnt[4]]];
+      ['fins', cnt[3]], ['spikes', cnt[1]], ['mouths', cnt[4]], ['stingers', cnt[7] || 0], ['jets', cnt[8] || 0], ['armor', cnt[2]]];
     $('c-kv').innerHTML = kv.map(function (x) { return '<div>' + x[0] + '<b>' + x[1] + '</b></div>'; }).join('');
   }
 

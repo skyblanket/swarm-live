@@ -481,7 +481,7 @@ fun make_creature(tab, world, s, ha, hb, slot, gen, sp, x, y, e, mom, dad) {
     nodes = layout(spec, x, y, Math.cos(a), Math.sin(a))
     %{spec: spec, nodes: nodes, mass: elem(st, 0), perim: elem(st, 1), nnodes: length(spec), hits: 0.0,
       pw: elem(st, 7) * 100.0 * fmax(0.0, nth(ph, 3)), sight: fmax(0.05, nth(ph, 4)) + elem(st, 6) * 12.0,
-      nspk: elem(st, 2), narm: elem(st, 3), nfin: elem(st, 4), nmou: elem(st, 5), nmus: elem(st, 8),
+      nspk: elem(st, 2), narm: elem(st, 3), nfin: elem(st, 4), nmou: elem(st, 5), nmus: elem(st, 8), njet: count_type(spec, 8, 0), nstg: count_type(spec, 7, 0),
       id: g(s, 'next_id'), slot: slot, gen: gen, sp: sp, ha: ha, hb: hb, ph: ph,
       types: types_of(ns), inl: in_lists(cs, ns, ns), pids: pids, nn: length(ns), nc: length(cs),
       x: x, y: y, hx: Math.cos(a), hy: Math.sin(a), e: e, h: 100.0, age: 0, life: 1300 + rndi(700),
@@ -509,9 +509,10 @@ fun founder_genome() {
 # ------------------------------------------------------------
 let max_nodes = 64
 
+# 0 body, 3 fin, 1 spike, 2 armor, 4 mouth, 5 eye, 7 stinger (venom), 8 jet (lunge)
 fun rand_type() {
     r = rndf()
-    if (r < 0.30) { 0 } else { if (r < 0.45) { 3 } else { if (r < 0.58) { 1 } else { if (r < 0.70) { 2 } else { if (r < 0.85) { 4 } else { 5 } } } } }
+    if (r < 0.28) { 0 } else { if (r < 0.42) { 3 } else { if (r < 0.54) { 1 } else { if (r < 0.65) { 2 } else { if (r < 0.79) { 4 } else { if (r < 0.88) { 5 } else { if (r < 0.94) { 7 } else { 8 } } } } } } }
 }
 
 fun new_mgene(parent, k) {
@@ -765,7 +766,7 @@ fun nt_one(c, nodes, spec, acc) {
         n = hd(nodes)
         sp = hd(spec)
         nt_one(c, tl(nodes), tl(spec), [{elem(n, 0), elem(n, 1), elem(n, 2), elem(n, 3), elem(sp, 0), elem(sp, 1), g(c, 'id'), g(c, 'sp'),
-              0.25 + fmax(0.0, numf(nth(g(c, 'outs'), 2))), fmax(0.0, nth(g(c, 'ph'), 3)), nth(g(c, 'ph'), 5)} | acc])
+              if (num(g(c, 'hcd')) > 0) { 0.0 } else { 0.25 + fmax(0.0, numf(nth(g(c, 'outs'), 2))) }, fmax(0.0, nth(g(c, 'ph'), 3)), nth(g(c, 'ph'), 5)} | acc])
     }
 }
 fun nbuild(lst, m) {
@@ -818,33 +819,41 @@ fun ct_items(a, lst, push, hits) {
                 rvy = elem(a, 3) - elem(b, 3)
                 impact = fabs(rvx * nx + rvy * ny)
                 strangers = elem(a, 7) != elem(b, 7)
-                h1 = if (strangers && elem(a, 5) == 1) { [{elem(a, 6), elem(b, 6), spike_dmg(a, b, impact)} | hits] } else { hits }
-                h2 = if (strangers && elem(b, 5) == 1) { [{elem(b, 6), elem(a, 6), spike_dmg(b, a, impact)} | h1] } else { h1 }
+                h1 = if (strangers && is_blade(elem(a, 5)) && elem(a, 8) > 0.0) { [{elem(a, 6), elem(b, 6), blade_dmg(a, b, impact), if (elem(a, 5) == 7) { 1 } else { 0 }, nx, ny} | hits] } else { hits }
+                h2 = if (strangers && is_blade(elem(b, 5)) && elem(b, 8) > 0.0) { [{elem(b, 6), elem(a, 6), blade_dmg(b, a, impact), if (elem(b, 5) == 7) { 1 } else { 0 }, 0.0 - nx, 0.0 - ny} | h1] } else { h1 }
                 ct_items(a, tl(lst), p2, h2)
             }
         }
     }
 }
+# a hit does at most 25 (before armor); a stinger (type 7) does a third of that at once and injects venom
+fun is_blade(t) { t == 1 || t == 7 }
 fun spike_dmg(att, tgt, impact) {
-    base = (2.0 + impact * 900.0) * (elem(att, 4) / 0.010) * elem(att, 9) * elem(att, 8)
+    base = fmin(25.0, (2.0 + impact * 900.0) * (elem(att, 4) / 0.010) * elem(att, 9) * elem(att, 8))
     if (elem(tgt, 5) == 2) { base / 3.0 } else { base }
 }
+fun blade_dmg(att, tgt, impact) { if (elem(att, 5) == 7) { spike_dmg(att, tgt, impact) / 3.0 } else { spike_dmg(att, tgt, impact) } }
 
 # sum per creature: id -> {dx, dy} and id -> damage taken, id -> damage dealt
 fun sum_push(lst, m) {
     if (length(lst) == 0) { m }
     else { p0 = hd(lst)  old = map_get(m, elem(p0, 0))  sum_push(tl(lst), map_put(m, elem(p0, 0), if (old == nil) { {elem(p0, 1), elem(p0, 2)} } else { {elem(old, 0) + elem(p0, 1), elem(old, 1) + elem(p0, 2)} })) }
 }
-fun sum_hits(lst, taken, dealt, by) {
-    if (length(lst) == 0) { {taken, dealt, by} }
+# also: who got venom, and the knockback of each hit (the target is thrown back, the attacker recoils)
+fun sum_hits(lst, taken, dealt, by, ven, kick) {
+    if (length(lst) == 0) { {taken, dealt, by, ven, kick} }
     else {
         h = hd(lst)
+        k1 = add_kick(kick, elem(h, 1), elem(h, 4) * 0.004, elem(h, 5) * 0.004)
         sum_hits(tl(lst), map_put(taken, elem(h, 1), numf(map_get(taken, elem(h, 1))) + elem(h, 2)),
-                 map_put(dealt, elem(h, 0), numf(map_get(dealt, elem(h, 0))) + elem(h, 2)), map_put(by, elem(h, 1), elem(h, 0)))
+                 map_put(dealt, elem(h, 0), numf(map_get(dealt, elem(h, 0))) + elem(h, 2)), map_put(by, elem(h, 1), elem(h, 0)),
+                 if (elem(h, 3) == 1) { map_put(ven, elem(h, 1), 1) } else { ven }, add_kick(k1, elem(h, 0), 0.0 - elem(h, 4) * 0.002, 0.0 - elem(h, 5) * 0.002))
     }
 }
+fun add_kick(m, id, dx, dy) { o = map_get(m, id)  map_put(m, id, if (o == nil) { {dx, dy} } else { {elem(o, 0) + dx, elem(o, 1) + dy} }) }
+fun add_vel(nodes, dx, dy, acc) { if (length(nodes) == 0) { rev(acc, []) } else { n = hd(nodes)  add_vel(tl(nodes), dx, dy, [{elem(n, 0), elem(n, 1), elem(n, 2) + dx, elem(n, 3) + dy} | acc]) } }
 
-fun apply_contacts(crs, pm, taken, dealt, by, acc) {
+fun apply_contacts(crs, pm, taken, dealt, by, ven, kick, acc) {
     if (length(crs) == 0) { acc }
     else {
         c = hd(crs)
@@ -854,8 +863,11 @@ fun apply_contacts(crs, pm, taken, dealt, by, acc) {
         tk = numf(map_get(taken, id))
         dl = numf(map_get(dealt, id))
         c2 = if (tk > 0.0) { p(p(p(c1, 'h', g(c1, 'h') - tk), 'pain', 10), 'killer', num(map_get(by, id))) } else { c1 }
-        c3 = if (dl > 0.0) { p(p(c2, 'e', fmin(100.0, g(c2, 'e') + dl * 0.5 * (0.25 + 0.75 * nth(g(c2, 'ph'), 5)))), 'hits', numf(g(c2, 'hits')) + 1.0) } else { c2 }
-        apply_contacts(tl(crs), pm, taken, dealt, by, [c3 | acc])
+        c3 = if (dl > 0.0) { p(p(p(c2, 'e', fmin(100.0, g(c2, 'e') + dl * 0.5 * (0.25 + 0.75 * nth(g(c2, 'ph'), 5)))), 'hits', numf(g(c2, 'hits')) + 1.0), 'hcd', 14) } else { c2 }
+        c4 = if (map_get(ven, id) != nil) { p(c3, 'ven', 120) } else { c3 }
+        kk = map_get(kick, id)
+        c5 = if (kk == nil) { c4 } else { p(c4, 'nodes', add_vel(g(c4, 'nodes'), elem(kk, 0), elem(kk, 1), [])) }
+        apply_contacts(tl(crs), pm, taken, dealt, by, ven, kick, [c5 | acc])
     }
 }
 fun cap_push(c, dx, dy) {
@@ -868,8 +880,8 @@ fun cap_push(c, dx, dy) {
 fun contact_step(crs) {
     nodes = node_tuples(crs, [])
     r = contacts(nodes, nbuild(nodes, %{}))
-    hs = sum_hits(elem(r, 1), %{}, %{}, %{})
-    apply_contacts(crs, sum_push(elem(r, 0), %{}), elem(hs, 0), elem(hs, 1), elem(hs, 2), [])
+    hs = sum_hits(elem(r, 1), %{}, %{}, %{}, %{}, %{})
+    apply_contacts(crs, sum_push(elem(r, 0), %{}), elem(hs, 0), elem(hs, 1), elem(hs, 2), elem(hs, 3), elem(hs, 4), [])
 }
 
 # mouths (and the core) eat: each eating point is {x, y, reach}
@@ -1401,7 +1413,8 @@ fun act_one(tab, c) {
     nodes = elem(r, 0)
     core = hd(nodes)
     c1 = p(p(p(p(p(p(p(p(p(c, 'nodes', nodes), 'x', elem(core, 0)), 'y', elem(core, 1)), 'bhx', elem(r, 1)), 'bhy', elem(r, 2)), 'hx', shx0 / shl), 'hy', shy0 / shl), 'om', elem(r, 4)), 'tf', tf)
-    p(p(p(p(p(c1, 'e', g(c1, 'e') - elem(r, 3)), 'outs', o), 'sig', nth(o, 3)), 'bite', if (nth(o, 2) > 0.3) { 1 } else { 0 }), 'mate', if (nth(o, 4) > 0.0) { 1 } else { 0 })
+    cj = jet(c1, thrust)
+    p(p(p(p(p(cj, 'e', g(cj, 'e') - elem(r, 3)), 'outs', o), 'sig', nth(o, 3)), 'bite', if (nth(o, 2) > 0.3) { 1 } else { 0 }), 'mate', if (nth(o, 4) > 0.0) { 1 } else { 0 })
 }
 
 fun flee_pass(tab, isl, all, crs) {
@@ -1599,7 +1612,7 @@ fun vitals(c) {
     tox = toxicity(g(c, 'x'), g(c, 'y'), vents(g(c, 'isl')))
     regen = g(c, 'e') > 40.0 && g(c, 'h') < 100.0 && tox == 0.0
     c0 = if (tox > 0.0) { p(p(p(c, 'h', g(c, 'h') - 1.2 * tox * numf(g(c, 'vk'))), 'pain', 6), 'killer', 0 - 2) } else { c }
-    vitals2(c0, cost, regen)
+    vitals2(status_tick(c0), cost, regen)
 }
 
 fun vitals2(c, cost, regen) {
@@ -1607,6 +1620,23 @@ fun vitals2(c, cost, regen) {
       'age', g(c, 'age') + 1), 'cool', g(c, 'cool') - 1), 'acd', g(c, 'acd') - 1), 'pain', if (g(c, 'pain') > 0) { g(c, 'pain') - 1 } else { 0 }), 'ate', if (num(g(c, 'ate')) > 0) { num(g(c, 'ate')) - 1 } else { 0 })
 }
 
+# ability timers: spike cooldown, jet cooldown and flame, venom (0.25 health a tick while it lasts)
+fun dec0(v) { if (v > 0) { v - 1 } else { 0 } }
+fun status_tick(c) {
+    v = num(g(c, 'ven'))
+    c1 = if (v > 0) { p(p(c, 'h', g(c, 'h') - 0.25), 'ven', v - 1) } else { c }
+    p(p(p(c1, 'hcd', dec0(num(g(c1, 'hcd')))), 'jcd', dec0(num(g(c1, 'jcd')))), 'boost', dec0(num(g(c1, 'boost'))))
+}
+# a jet (type 8) fires when the brain floors its thrust: the whole body lunges along its heading,
+# costing 2 energy per jet; then it needs 50 ticks to recharge
+fun jet(c, thrust) {
+    nj = num(g(c, 'njet'))
+    if (nj > 0 && thrust > 0.85 && num(g(c, 'jcd')) <= 0) {
+        k = 0.004 * to_float(nj) / (1.0 + 0.03 * numf(g(c, 'mass')))
+        p(p(p(p(c, 'nodes', add_vel(g(c, 'nodes'), g(c, 'hx') * k, g(c, 'hy') * k, [])), 'jcd', 50), 'boost', 10), 'e', g(c, 'e') - 2.0 * to_float(nj))
+    } else { c }
+}
+fun count_type(spec, t, n) { if (length(spec) == 0) { n } else { count_type(tl(spec), t, if (elem(hd(spec), 1) == t) { n + 1 } else { n }) } }
 fun map_vitals(crs, acc) { if (length(crs) == 0) { acc } else { map_vitals(tl(crs), [vitals(hd(crs)) | acc]) } }
 
 # ---- death: the brain's processes stop, the body becomes meat ----
@@ -2502,7 +2532,7 @@ fun tr_new(ha, hb, id, x, y, hx, hy) {
     spec = build_spec(ph, expr_morph(list_or_empty(g(ha, 'm')), list_or_empty(g(hb, 'm'))))
     st = body_stats(spec)
     n = length(ns)
-    %{id: id, sp: id, ph: ph, spec: spec, nodes: layout(spec, x, y, hx, hy), mass: elem(st, 0), nspk: elem(st, 2),
+    %{id: id, sp: id, ph: ph, spec: spec, nodes: layout(spec, x, y, hx, hy), mass: elem(st, 0), nspk: elem(st, 2) + count_type(spec, 7, 0), njet: count_type(spec, 8, 0),
       sight: fmax(0.05, nth(ph, 4)) + elem(st, 6) * 12.0, x: x, y: y, hx: hx, hy: hy, bhx: hx, bhy: hy, om: 0.0, tf: 0.0,
       cfg: ab_cfgs(ns, []), ws: in_lists(elem(pt, 2), ns, ns), as: zeros(n, []), vs: zeros(n, []),
       pl: [nth(ph, 11), nth(ph, 12), nth(ph, 13), nth(ph, 14), nth(ph, 15), nth(ph, 16)],
@@ -2522,7 +2552,7 @@ fun tr_move(c, sens, tick, plast) {
     nodes = elem(r, 0)
     core = hd(nodes)
     m1 = p(p(p(p(p(p(p(p(c, 'nodes', nodes), 'x', elem(core, 0)), 'y', elem(core, 1)), 'bhx', elem(r, 1)), 'bhy', elem(r, 2)), 'hx', shx0 / shl), 'hy', shy0 / shl), 'om', elem(r, 4))
-    p(p(p(p(p(p(p(m1, 'tf', tf), 'outs', o), 'ws', elem(r0, 0)), 'as', elem(r0, 1)), 'vs', elem(r0, 2)), 'work', g(c, 'work') + elem(r, 3)), 'pain', if (g(c, 'pain') > 0) { g(c, 'pain') - 1 } else { 0 })
+    status_tick(jet(p(p(p(p(p(p(p(m1, 'tf', tf), 'outs', o), 'ws', elem(r0, 0)), 'as', elem(r0, 1)), 'vs', elem(r0, 2)), 'work', g(c, 'work') + elem(r, 3)), 'pain', if (g(c, 'pain') > 0) { g(c, 'pain') - 1 } else { 0 }), thrust))
 }
 fun near_item(c, tx, ty) { dx = tx - g(c, 'x')  dy = ty - g(c, 'y')  [Math.sqrt(dx * dx + dy * dy), dx, dy] }
 fun dist_to(c, tx, ty) { dx = tx - g(c, 'x')  dy = ty - g(c, 'y')  Math.sqrt(dx * dx + dy * dy) }
@@ -2545,10 +2575,10 @@ fun tr_sens(c, food, crt, threat, sz) {
 fun r3l(x, y) { [r3(x / WS), r3(y / WS)] }
 fun live_bodies(crs) {
     if (length(crs) == 0) { [] }
-    else { c = hd(crs)  [[Math.round(nth(g(c, 'ph'), 6)), body_flat(g(c, 'spec'), g(c, 'nodes'), []), Math.round(fmax(0.0, g(c, 'h')) * 100.0 / g(c, 'hmax')), g(c, 'pain'), r2(nth(g(c, 'outs'), 1)), r2(hd(g(c, 'outs'))), r2(nth(g(c, 'outs'), 2))] | live_bodies(tl(crs))] }
+    else { c = hd(crs)  [[Math.round(nth(g(c, 'ph'), 6)), body_flat(g(c, 'spec'), g(c, 'nodes'), []), Math.round(fmax(0.0, g(c, 'h')) * 100.0 / g(c, 'hmax')), g(c, 'pain'), r2(nth(g(c, 'outs'), 1)), r2(hd(g(c, 'outs'))), r2(nth(g(c, 'outs'), 2)), num(g(c, 'ven')), num(g(c, 'boost'))] | live_bodies(tl(crs))] }
 }
 fun live_frame(task, tick, crs, tg, score, n) {
-    LiveView.broadcast("arena", {'frame', json_encode(%{t: "ev", n: "live", d: %{task: task, tick: tick, T: if (task == 2) { 500 } else { if (task == 0) { light_T() } else { chase_T() } }, b: live_bodies(crs), tg: tg, sc: r2(score), n: n}})})
+    LiveView.broadcast("arena", {'frame', json_encode(%{t: "ev", n: "live", d: %{task: task, tick: tick, T: if (task == 2) { 700 } else { if (task == 0) { light_T() } else { chase_T() } }, b: live_bodies(crs), tg: tg, sc: r2(score), n: n}})})
     sleep(25)
 }
 
@@ -2635,15 +2665,15 @@ fun ch_loop(c, pr, pa, pb, caught, close, tick, seed, plast, live) {
 # Fighters get three times the world's health so a duel takes several exchanges (one hit of a long spiked limb can do 100) ----
 fun fi_new(ha, hb, id, x, hx) { c = tr_new(ha, hb, id, x, 0.8, hx, 0.0)  p(p(c, 'h', 300.0), 'hmax', 300.0) }
 fun t_fight(ha, hb, oa, ob, plast, live) {
-    a = fi_new(ha, hb, 1, 0.6, 1.0)
-    b = fi_new(oa, ob, 2, 1.0, 0.0 - 1.0)
+    a = fi_new(ha, hb, 1, 0.5, 1.0)
+    b = fi_new(oa, ob, 2, 1.1, 0.0 - 1.0)
     fi_loop(a, b, 0.0, 0, plast, live)
 }
 fun fi_sens(c, o) {
     tr_sens(c, nil, near_item(c, g(o, 'x'), g(o, 'y')), if (g(o, 'nspk') > 0) { 1.0 } else { 0.5 }, hd(g(o, 'ph')) - hd(g(c, 'ph')))
 }
 fun fi_loop(a, b, close, tick, plast, live) {
-    if (tick >= 500 || g(a, 'h') <= 0.0 || g(b, 'h') <= 0.0) {
+    if (tick >= 700 || g(a, 'h') <= 0.0 || g(b, 'h') <= 0.0) {
         if (live > 0) { live_frame(2, tick, [a, b], nil, elem(fi_score(a, b, close), 0), 0) } else { 'x' }
         fi_score(a, b, close)
     }
@@ -2662,7 +2692,7 @@ fun fi_loop(a, b, close, tick, plast, live) {
 fun fi_score(a, b, close) {
     ta = (300.0 - fmax(0.0, g(a, 'h'))) / 3.0
     tb = (300.0 - fmax(0.0, g(b, 'h'))) / 3.0
-    cl = 5.0 * close / 500.0
+    cl = 5.0 * close / 700.0
     {tb - 0.5 * ta + (if (g(b, 'h') <= 0.0) { 25.0 } else { 0.0 }) + cl, ta - 0.5 * tb + (if (g(a, 'h') <= 0.0) { 25.0 } else { 0.0 }) + cl}
 }
 

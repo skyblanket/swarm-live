@@ -751,6 +751,10 @@
         col = edge ? (((x + y) & 1) ? '#f4f0e8' : '#3a0a10') : (d < R * 0.5 ? '#14040a' : '#7a1822');
       } else if (type === 5) {
         col = d < Math.max(1, R * 0.45) ? '#05060a' : (edge ? '#9aa4b8' : '#f2f6ff');
+      } else if (type === 7) {
+        col = edge ? '#3a1050' : (d < R * 0.4 ? '#7dff9a' : '#b45cf0');
+      } else if (type === 8) {
+        col = edge ? '#4a2208' : (d < R * 0.45 ? '#1a0a04' : '#ff9a3c');
       } else { col = hsl(hue, 60, 55); }
       g.fillStyle = col; g.fillRect(x, y, 1, 1);
     }
@@ -775,7 +779,7 @@
       pixelLine(P[pi], P[i], tw, hsl(hue, 45, 26, 0.95));
       pixelLine(P[pi], P[i], Math.max(view.k * 0.6, tw * 0.5), hsl(hue, 55, 44, 0.95));
     }
-    var order = [3, 0, 2, 4, 5, 6, 1];
+    var order = [3, 0, 2, 4, 5, 8, 6, 7, 1];
     ag.imageSmoothingEnabled = false;
     for (var oi = 0; oi < order.length; oi++) {
       var T = order[oi];
