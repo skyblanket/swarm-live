@@ -625,7 +625,7 @@ fun part3() {
     "\n" ++
     "  /* ---------- controls ---------- */\n" ++
     "  document.addEventListener('click', function (e) {\n" ++
-    "    var t = e.target.closest ? e.target.closest('[data-speed],#b-plast,#b-save,#b-load,#b-reset,#b-close,.spr,[data-isl]') : null;\n" ++
+    "    var t = e.target.closest ? e.target.closest('[data-speed],#b-plast,#b-save,#b-load,#b-reset,#b-close,#b-savecr,.spr,[data-isl]') : null;\n" ++
     "    if (!t) return;\n" ++
     "    if (t.hasAttribute('data-speed')) window.swSend('speed', { k: Number(t.getAttribute('data-speed')) });\n" ++
     "    else if (t.id === 'b-plast') window.swSend('plast', {});\n" ++
@@ -633,6 +633,7 @@ fun part3() {
     "    else if (t.id === 'b-load') { window.swSend('load', {}); toast('Loading checkpoint...'); }\n" ++
     "    else if (t.id === 'b-reset') { if (confirm('Start a new random world? The last checkpoint stays on disk until the next save.')) { hist = []; window.swSend('reset', {}); } }\n" ++
     "    else if (t.id === 'b-close') closeInsp();\n" ++
+    "    else if (t.id === 'b-savecr') { if (inspId) { window.swSend('savecr', { isl: view_i, id: inspId }); toast('Saved creature #' + inspId + ' to checkpoints/evolve4/creatures/'); } }\n" ++
     "    else if (t.hasAttribute('data-isl')) switchIsland(Number(t.getAttribute('data-isl')));\n" ++
     "    else if (t.classList.contains('spr')) { var id = Number(t.getAttribute('data-id')); if (id) openInsp(id); }\n" ++
     "  });\n" ++
@@ -818,11 +819,11 @@ fun part3() {
     "\n" ++
     "  function SX(u) { return view.ox + u * view.s; }\n" ++
     "  function SY(u) { return view.oy + u * view.s; }\n" ++
-    "  function drawArena(now) {\n" ++
     ""
 }
 
 fun part4() {
+    "  function drawArena(now) {\n" ++
     "    ag.clearRect(0, 0, AW, AH);\n" ++
     "    drawSlide(now);\n" ++
     "    ag.imageSmoothingEnabled = false;\n" ++

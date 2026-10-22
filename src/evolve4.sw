@@ -506,7 +506,7 @@ fun founder_genome() {
 # turn makes the left and right strokes unequal. Fins drag strongly across and weakly
 # along their link, so a flapping fin can push the body; nothing else makes it move.
 # ------------------------------------------------------------
-let max_nodes = 15
+let max_nodes = 64
 
 fun rand_type() {
     r = rndf()
@@ -646,11 +646,14 @@ fun bstat(spec, m, per, sp, ar, fi, mo, eye, spr, mu) {
 # The body has its own heading and angular velocity: a muscle pulling a limb one way twists the
 # body the other way (torque / moment of inertia), the way a swimmer's body yaws with each stroke.
 # returns {nodes, hx, hy, work, om}
-fun physics(spec, nodes, hx, hy, om, ph, thrust, turn, tick, slowk, obs) {
+fun physics(spec, nodes, hx, hy, om, ph, thrust, turn, tick, slowk, obs, mass) {
     freq = fmax(0.1, nth(ph, 1))
     w = 0.35 * freq
     stren = fmax(0.0, nth(ph, 2))
-    phys_sub(spec, nodes, hx, hy, om, w, freq, stren, thrust, turn, tick, slowk, obs, 2, 0.0)
+    # cilia: a small push along the body axis and a small turning torque, weaker for heavy bodies
+    cil = 1.0 / (1.0 + 0.08 * fmax(1.0, mass))
+    nodes0 = push_core(nodes, hx * 0.0007 * thrust * cil / slowk, hy * 0.0007 * thrust * cil / slowk)
+    phys_sub(spec, nodes0, hx, hy, om + 0.035 * turn * cil, w, freq, stren, thrust, turn, tick, slowk, obs, 2, 0.0)
 }
 fun phys_sub(spec, nodes, hx, hy, om, w, freq, stren, thrust, turn, tick, slowk, obs, k, work) {
     if (k <= 0) { {nodes, hx, hy, work, om} }
@@ -658,7 +661,7 @@ fun phys_sub(spec, nodes, hx, hy, om, w, freq, stren, thrust, turn, tick, slowk,
         t = to_float(tick) + (if (k == 1) { 0.5 } else { 0.0 })
         acts = muscle_acts(spec, w, t, stren, thrust, turn, [])
         ft = forces(spec, nodes, acts, hx, hy, 0, zero_v(length(nodes), []), 0.0, 0.0001)
-        om2 = (om + elem(ft, 1) / elem(ft, 2)) * (1.0 - 0.2 * slowk)
+        om2 = (om + elem(ft, 1) / elem(ft, 2)) * (1.0 - 0.3 * slowk)
         hh = rot(hx, hy, om2)
         hl = Math.sqrt(elem(hh, 0) * elem(hh, 0) + elem(hh, 1) * elem(hh, 1)) + 0.000001
         bc = elem(hh, 0) / hl
@@ -667,6 +670,7 @@ fun phys_sub(spec, nodes, hx, hy, om, w, freq, stren, thrust, turn, tick, slowk,
         phys_sub(spec, nodes2, bc, bs, om2, w, freq, stren, thrust, turn, tick, slowk, obs, k - 1, work + sum_abs(acts, 0.0) * stren * freq * 0.0012)
     }
 }
+fun push_core(nodes, dvx, dvy) { n = hd(nodes)  [{elem(n, 0), elem(n, 1), elem(n, 2) + dvx, elem(n, 3) + dvy} | tl(nodes)] }
 fun zero_v(n, acc) { if (n <= 0) { acc } else { zero_v(n - 1, [{0.0, 0.0} | acc]) } }
 fun sum_abs(l, a) { if (length(l) == 0) { a } else { sum_abs(tl(l), a + fabs(hd(l))) } }
 
@@ -805,7 +809,7 @@ fun ct_items(a, lst, push, hits) {
             if (d2 >= rr * rr) { ct_items(a, tl(lst), push, hits) }
             else {
                 d = Math.sqrt(d2) + 0.000001
-                ov = (rr - d) * 0.5
+                ov = (rr - d) * 0.15
                 nx = dx / d
                 ny = dy / d
                 p2 = [{elem(a, 6), 0.0 - nx * ov, 0.0 - ny * ov}, {elem(b, 6), nx * ov, ny * ov} | push]
@@ -855,7 +859,7 @@ fun apply_contacts(crs, pm, taken, dealt, by, acc) {
 }
 fun cap_push(c, dx, dy) {
     l = Math.sqrt(dx * dx + dy * dy)
-    k = if (l > 0.02) { 0.02 / l } else { 1.0 }
+    k = if (l > 0.004) { 0.004 / l } else { 1.0 }
     nodes = shift_nodes(g(c, 'nodes'), dx * k, dy * k, [])
     p(p(p(c, 'nodes', nodes), 'x', elem(hd(nodes), 0)), 'y', elem(hd(nodes), 1))
 }
@@ -894,7 +898,9 @@ fun touches(pts, x, y) {
 # eight environments; island i lives in environment i % 8
 #   0 Green Meadows  1 Toxic Marsh  2 Lean Waters  3 Rich Shallows      (the evolved four)
 #   4 Coral Reef     5 Kelp Forest  6 Arctic Ice   7 Black Smoker       (new, fresh evolution)
-fun env(i) { nth([0, 6, 5, 4, 7, 1, 2, 3], i % 8) }
+# force_env >= 0 puts every island in that environment (one big world split into islands)
+let force_env = 0 - 1
+fun env(i) { if (force_env >= 0) { force_env } else { nth([0, 6, 5, 4, 7, 1, 2, 3], i % 8) } }
 fun obstacles(i) { obst_c(env(i)) }
 fun obst_c(i) {
     if (i == 0) { [[1.20, 1.18, 0.07], [1.33, 1.28, 0.06], [1.17, 1.36, 0.05], [1.40, 1.12, 0.045], [1.29, 1.44, 0.045], [0.40, 0.45, 0.06], [1.10, 0.38, 0.05], [0.30, 1.30, 0.05]] }
@@ -1018,7 +1024,7 @@ fun slots(k, hi) { rev(slots_acc(k, hi, []), []) }
 fun slots_acc(k, hi, acc) { if (k >= hi) { acc } else { slots_acc(k + 1, hi, [k | acc]) } }
 
 # four islands, four climates: same rocks and vents, different food, poison and vent strength
-fun isl_plants(i) { nth([150, 150, 95, 210, 160, 150, 115, 150], env(i)) }
+fun isl_plants(i) { nth([120, 120, 80, 160, 130, 120, 95, 120], env(i)) }
 fun isl_poison(i) { nth([30, 75, 20, 30, 20, 15, 10, 35], env(i)) }
 fun isl_vk(i) { nth([1.0, 2.2, 1.0, 1.0, 1.5, 1.0, 1.0, 3.0], env(i)) }
 fun nisl(tab) { num(cget(tab, 'n_isl')) }
@@ -1383,10 +1389,15 @@ fun act_one(tab, c) {
     o = read_acts(tab, g(c, 'slot'), 0, n_out)
     thrust = fmax(0.0, nth(o, 1))
     slowk = if (in_zone(g(c, 'x'), g(c, 'y'), kelp(g(c, 'isl')))) { 1.8 } else { 1.0 }
-    r = physics(g(c, 'spec'), g(c, 'nodes'), g(c, 'hx'), g(c, 'hy'), numf(g(c, 'om')), g(c, 'ph'), thrust, hd(o), g(c, 'age') + g(c, 'id'), slowk, obstacles(g(c, 'isl')))
+    bhx = if (g(c, 'bhx') == nil) { g(c, 'hx') } else { g(c, 'bhx') }
+    bhy = if (g(c, 'bhy') == nil) { g(c, 'hy') } else { g(c, 'bhy') }
+    r = physics(g(c, 'spec'), g(c, 'nodes'), bhx, bhy, numf(g(c, 'om')), g(c, 'ph'), thrust, hd(o), g(c, 'age') + g(c, 'id'), slowk, obstacles(g(c, 'isl')), numf(g(c, 'mass')))
+    shx0 = 0.8 * g(c, 'hx') + 0.2 * elem(r, 1)
+    shy0 = 0.8 * g(c, 'hy') + 0.2 * elem(r, 2)
+    shl = Math.sqrt(shx0 * shx0 + shy0 * shy0) + 0.000001
     nodes = elem(r, 0)
     core = hd(nodes)
-    c1 = p(p(p(p(p(p(c, 'nodes', nodes), 'x', elem(core, 0)), 'y', elem(core, 1)), 'hx', elem(r, 1)), 'hy', elem(r, 2)), 'om', elem(r, 4))
+    c1 = p(p(p(p(p(p(p(p(c, 'nodes', nodes), 'x', elem(core, 0)), 'y', elem(core, 1)), 'bhx', elem(r, 1)), 'bhy', elem(r, 2)), 'hx', shx0 / shl), 'hy', shy0 / shl), 'om', elem(r, 4))
     p(p(p(p(p(c1, 'e', g(c1, 'e') - elem(r, 3)), 'outs', o), 'sig', nth(o, 3)), 'bite', if (nth(o, 2) > 0.3) { 1 } else { 0 }), 'mate', if (nth(o, 4) > 0.0) { 1 } else { 0 })
 }
 
@@ -1984,6 +1995,18 @@ fun world_loop(tab, s) {
 }
 
 # migrants arrive as messages from other island processes
+fun save_creature(c, s) {
+    file_mkdir("checkpoints")
+    file_mkdir(ck_dir)
+    file_mkdir(ck_dir ++ "/creatures")
+    path = ck_dir ++ "/creatures/creature-" ++ to_string(g(c, 'id')) ++ ".json"
+    data = %{id: g(c, 'id'), island: g(s, 'isl'), env: env(g(s, 'isl')), gen: g(c, 'gen'), species: g(c, 'sp'), age: g(c, 'age'), kids: g(c, 'kids'),
+             eaten: g(c, 'eaten'), nodes: g(c, 'nnodes'), mass: g(c, 'mass'), neurons: g(c, 'nn'), synapses: g(c, 'nc'), tick: g(s, 'tick'),
+             ha: g(c, 'ha'), hb: g(c, 'hb')}
+    file_atomic_write(path, json_encode(data))
+    eprint("[evolve4] saved " ++ path)
+}
+
 fun recv_migrants(tab, world, s) {
     receive {
         {'mig', ha, hb, gen, sp, from, fromid} ->
@@ -1991,6 +2014,10 @@ fun recv_migrants(tab, world, s) {
             s1 = birth(tab, world, s, ha, hb, gen, sp, hd(pos), nth(pos, 1), 65.0, fromid, fromid, 4)
             arrived = length(g(s1, 'crs')) > length(g(s, 'crs'))
             recv_migrants(tab, world, if (arrived) { p(s1, 'evs', [[15, 0, Math.round(nth(g(hd(g(s1, 'crs')), 'ph'), 6)), gen, from, 0] | g(s1, 'evs')]) } else { s1 })
+        {'savecr', id} ->
+            c = find_id(g(s, 'crs'), id)
+            if (c == nil) { 'x' } else { save_creature(c, s) }
+            recv_migrants(tab, world, s)
         after 0 { s }
     }
 }
@@ -2229,11 +2256,20 @@ fun inbox(tab) {
         {'cmd', c} ->
             cmd_all(tab, c, 0)
             inbox(tab)
+        {'savecr', isl, id} ->
+            pid = cget(tab, k_isl + 300 + isl)
+            if (pid == nil) { 'x' } else { send(pid, {'savecr', id}) }
+            inbox(tab)
         _o -> inbox(tab)
     }
 }
 
 fun cmd_all(tab, c, k) { if (k >= nisl(tab)) { 'ok' } else { cput(tab, k_isl + 200 + k, c)  cmd_all(tab, c, k + 1) } }
+
+fun save_cr_event(isl, id) {
+    a = whereis('evolve4_in')
+    if (a == nil) { 'noop' } else { send(a, {'savecr', isl, id}) }
+}
 
 fun inbox_send(msg) {
     a = whereis('evolve4_in')
@@ -2253,8 +2289,9 @@ fun handle_event(name, value, assigns) {
     else { if (name == "save") { inbox_send({'cmd', 'save'}) }
     else { if (name == "load") { inbox_send({'cmd', 'load'}) }
     else { if (name == "reset") { inbox_send({'cmd', 'reset'}) }
+    else { if (name == "savecr") { save_cr_event(to_int(map_get(value, 'isl')), to_int(map_get(value, 'id'))) }
     else { if (name == "view") { inbox_send({'set', k_isl + 600 + to_int(map_get(value, 'i')), timestamp()})  if (map_get(value, 'fresh') != nil) { inbox_send({'set', 'sel_dirty', 1}) } else { 'x' } }
-    else { 'noop' } } } } } } } }
+    else { 'noop' } } } } } } } } }
     assigns
 }
 
@@ -2338,7 +2375,7 @@ fun render(assigns) {
         "<p class=\"cap\">No fitness function, no teacher, no scripted movement: each body is grown from its genes as nodes and muscles, and it only moves if its fins push water. Every hunter is an evolved creature too. A brain is <b>built from the genes</b>, one swarmrt process per neuron. Creatures that find food and mates leave children; the rest die. Genes come in <b>two copies</b> that cross over and mutate; synapses also learn during a life by a rule that itself evolves. Turn <b>Learning</b> off to test whether that rule matters.</p></div>" ++
         "</div>" ++
         "<div class=\"pg off\" id=\"pg-insp\">" ++
-        "<div class=\"card\"><div class=\"ih\"><canvas id=\"i-spr\" width=\"32\" height=\"32\" sw-keep></canvas><div><div class=\"tt\" id=\"i-title\" sw-keep>&ndash;</div><div class=\"st\" id=\"i-sub\" sw-keep></div></div><button class=\"x\" id=\"b-close\">Back</button></div>" ++
+        "<div class=\"card\"><div class=\"ih\"><canvas id=\"i-spr\" width=\"32\" height=\"32\" sw-keep></canvas><div><div class=\"tt\" id=\"i-title\" sw-keep>&ndash;</div><div class=\"st\" id=\"i-sub\" sw-keep></div></div><button class=\"x\" id=\"b-savecr\" style=\"margin-left:auto\">Save this creature</button><button class=\"x\" id=\"b-close\" style=\"margin-left:6px\">Back</button></div>" ++
         "<div class=\"vit\" id=\"i-vit\" sw-keep></div></div>" ++
         "<div class=\"card\"><h3>Its brain <span id=\"i-bsub\"></span></h3><canvas id=\"brain-cv\" class=\"cvb\" style=\"height:300px\" sw-keep></canvas>" ++
         "<p class=\"cap\">Left: its <b>18 senses</b>. Right: its <b>5 actions</b>. Middle: neurons its genes grew. Lines are synapses (blue excites, red inhibits, dashed amber modulates learning, violet glow = changed by learning in this life). Dots moving along lines are messages between processes.</p></div>" ++
