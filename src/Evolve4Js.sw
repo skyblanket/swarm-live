@@ -58,7 +58,7 @@ fun part0() {
     "      '<span style=\"color:#6b6b6b\">bodies: paddles = fins (they row) &middot; red blades = spikes (wound on impact) &middot; grey = armor &middot; dark red = mouths &middot; white = eyes</span>';\n" ++
     "  }\n" ++
     "  var SENS = ['bias', 'plant dir', 'plant near', 'meat dir', 'meat near', 'other dir', 'other near', 'kinship', 'its size', 'its signal',\n" ++
-    "    'hunter dir', 'hunter near', 'hunter biting', 'wall ahead', 'energy', 'health', 'pain', 'heard', 'poison dir', 'poison near', 'toxic here', 'toxic ahead'];\n" ++
+    "    'hunter dir', 'hunter near', 'hunter biting', 'wall ahead', 'energy', 'health', 'pain', 'heard', 'poison dir', 'poison near', 'toxic here', 'toxic ahead', 'just ate'];\n" ++
     "  var OUTS = ['turn', 'thrust', 'bite', 'signal', 'mate'];\n" ++
     "  var LOCI = ['size', 'speed', 'armor', 'attack', 'sight', 'diet', 'hue', 'pattern', 'pattern', 'pattern', 'mutation', 'plasticity', 'rule A', 'rule B', 'rule C', 'rule D', 'mod base', 'fertility', 'choosiness'];\n" ++
     "  var LGROUP = [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 3, 3, 3, 3, 3, 3, 4, 4];\n" ++

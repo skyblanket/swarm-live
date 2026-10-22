@@ -40,7 +40,7 @@ let k_dead = 2000000000
 let k_isl = 300000
 let nmax = 64
 let n_out = 5
-let n_sens = 22
+let n_sens = 23
 let n_loci = 19
 let cmax = 160
 let tick_ms = 25
@@ -483,7 +483,7 @@ fun make_creature(tab, world, s, ha, hb, slot, gen, sp, x, y, e, mom, dad) {
       nspk: elem(st, 2), narm: elem(st, 3), nfin: elem(st, 4), nmou: elem(st, 5), nmus: elem(st, 8),
       id: g(s, 'next_id'), slot: slot, gen: gen, sp: sp, ha: ha, hb: hb, ph: ph,
       types: types_of(ns), inl: in_lists(cs, ns, ns), pids: pids, nn: length(ns), nc: length(cs),
-      x: x, y: y, hx: Math.cos(a), hy: Math.sin(a), e: e, h: 100.0, age: 0, life: 2200 + rndi(1400),
+      x: x, y: y, hx: Math.cos(a), hy: Math.sin(a), e: e, h: 100.0, age: 0, life: 1300 + rndi(700),
       cool: 160, acd: 0, kids: 0, kills: 0, eaten: 0, pain: 0, sig: 0.0, bite: 0, mate: 0, outs: [0.0, 0.0, 0.0, 0.0, 0.0],
       sv: [], mom: mom, dad: dad, killer: 0, vk: g(s, 'vk'), isl: g(s, 'isl')}
 }
@@ -653,7 +653,7 @@ fun physics(spec, nodes, hx, hy, om, ph, thrust, turn, tick, slowk, obs, mass) {
     # cilia: a small push along the body axis and a small turning torque, weaker for heavy bodies
     cil = 1.0 / (1.0 + 0.08 * fmax(1.0, mass))
     nodes0 = push_core(nodes, hx * 0.0007 * thrust * cil / slowk, hy * 0.0007 * thrust * cil / slowk)
-    phys_sub(spec, nodes0, hx, hy, om + 0.035 * turn * cil, w, freq, stren, thrust, turn, tick, slowk, obs, 2, 0.0)
+    phys_sub(spec, nodes0, hx, hy, om + 0.015 * turn * cil, w, freq, stren, thrust, turn, tick, slowk, obs, 2, 0.0)
 }
 fun phys_sub(spec, nodes, hx, hy, om, w, freq, stren, thrust, turn, tick, slowk, obs, k, work) {
     if (k <= 0) { {nodes, hx, hy, work, om} }
@@ -1275,7 +1275,8 @@ fun senses(s, c) {
     wa = 1.0 - fmin(wall_t(x, y, hx, hy), 0.25) / 0.25
     [1.0, hd(pl), nth(pl, 1), hd(mt), nth(mt, 1), hd(cv), nth(cv, 1), kin, sz, osig,
      hd(pv), nth(pv, 1), threat, wa, g(c, 'e') / 100.0, g(c, 'h') / 100.0, if (g(c, 'pain') > 0) { 1.0 } else { 0.0 }, heard,
-     hd(po), nth(po, 1), toxicity(x, y, vents(g(c, 'isl'))), toxicity(x + hx * 0.09, y + hy * 0.09, vents(g(c, 'isl')))]
+     hd(po), nth(po, 1), toxicity(x, y, vents(g(c, 'isl'))), toxicity(x + hx * 0.09, y + hy * 0.09, vents(g(c, 'isl'))),
+     if (num(g(c, 'ate')) > 0) { 1.0 } else { 0.0 }]
 }
 
 # ------------------------------------------------------------
@@ -1290,7 +1291,7 @@ fun live_body(sv, c) { set_at(set_at(set_at(sv, 14, g(c, 'e') / 100.0), 15, g(c,
 # creature's neurons their tick, and returns the senses to the island.
 fun slim(c) {
     %{id: g(c, 'id'), x: g(c, 'x'), y: g(c, 'y'), hx: g(c, 'hx'), hy: g(c, 'hy'), ph: g(c, 'ph'), sp: g(c, 'sp'), isl: g(c, 'isl'),
-      e: g(c, 'e'), h: g(c, 'h'), pain: g(c, 'pain'), sv: g(c, 'sv'), pids: g(c, 'pids'), sight: g(c, 'sight'), pw: g(c, 'pw')}
+      e: g(c, 'e'), h: g(c, 'h'), pain: g(c, 'pain'), sv: g(c, 'sv'), pids: g(c, 'pids'), sight: g(c, 'sight'), pw: g(c, 'pw'), ate: g(c, 'ate')}
 }
 fun chunks(crs, k, cur, n, acc) {
     if (length(crs) == 0) { if (length(cur) == 0) { acc } else { [cur | acc] } }
@@ -1391,13 +1392,14 @@ fun act_one(tab, c) {
     slowk = if (in_zone(g(c, 'x'), g(c, 'y'), kelp(g(c, 'isl')))) { 1.8 } else { 1.0 }
     bhx = if (g(c, 'bhx') == nil) { g(c, 'hx') } else { g(c, 'bhx') }
     bhy = if (g(c, 'bhy') == nil) { g(c, 'hy') } else { g(c, 'bhy') }
-    r = physics(g(c, 'spec'), g(c, 'nodes'), bhx, bhy, numf(g(c, 'om')), g(c, 'ph'), thrust, hd(o), g(c, 'age') + g(c, 'id'), slowk, obstacles(g(c, 'isl')), numf(g(c, 'mass')))
+    tf = 0.75 * numf(g(c, 'tf')) + 0.25 * hd(o)
+    r = physics(g(c, 'spec'), g(c, 'nodes'), bhx, bhy, numf(g(c, 'om')), g(c, 'ph'), thrust, tf, g(c, 'age') + g(c, 'id'), slowk, obstacles(g(c, 'isl')), numf(g(c, 'mass')))
     shx0 = 0.8 * g(c, 'hx') + 0.2 * elem(r, 1)
     shy0 = 0.8 * g(c, 'hy') + 0.2 * elem(r, 2)
     shl = Math.sqrt(shx0 * shx0 + shy0 * shy0) + 0.000001
     nodes = elem(r, 0)
     core = hd(nodes)
-    c1 = p(p(p(p(p(p(p(p(c, 'nodes', nodes), 'x', elem(core, 0)), 'y', elem(core, 1)), 'bhx', elem(r, 1)), 'bhy', elem(r, 2)), 'hx', shx0 / shl), 'hy', shy0 / shl), 'om', elem(r, 4))
+    c1 = p(p(p(p(p(p(p(p(p(c, 'nodes', nodes), 'x', elem(core, 0)), 'y', elem(core, 1)), 'bhx', elem(r, 1)), 'bhy', elem(r, 2)), 'hx', shx0 / shl), 'hy', shy0 / shl), 'om', elem(r, 4)), 'tf', tf)
     p(p(p(p(p(c1, 'e', g(c1, 'e') - elem(r, 3)), 'outs', o), 'sig', nth(o, 3)), 'bite', if (nth(o, 2) > 0.3) { 1 } else { 0 }), 'mate', if (nth(o, 4) > 0.0) { 1 } else { 0 })
 }
 
@@ -1480,7 +1482,7 @@ fun feed_all(s, crs, acc) {
         f = if (near_p) { eat_plants(g(s, 'plants'), c, g(s, 'tick'), [], 0) } else { {g(s, 'plants'), 0} }
         m = if (near_m) { eat_meat(g(s, 'meat'), c, [], 0.0) } else { {g(s, 'meat'), 0.0} }
         gain = to_float(elem(f, 1)) * 26.0 * (1.0 - 0.75 * diet) + elem(m, 1) * (0.25 + 0.75 * diet)
-        c1 = if (gain > 0.0) { p(p(c, 'e', fmin(100.0, g(c, 'e') + gain)), 'eaten', g(c, 'eaten') + 1) } else { c }
+        c1 = if (gain > 0.0) { p(p(p(c, 'e', fmin(100.0, g(c, 'e') + gain)), 'eaten', g(c, 'eaten') + 1), 'ate', 8) } else { c }
         c2 = if (elem(q, 1) > 0) { p(p(p(p(c1, 'h', g(c1, 'h') - 24.0), 'e', g(c1, 'e') - 4.0), 'pain', 10), 'killer', 0 - 2) } else { c1 }
         feed_all(p(p(p(s, 'plants', elem(f, 0)), 'meat', elem(m, 0)), 'poison', elem(q, 0)), tl(crs), [c2 | acc])
     }
@@ -1601,7 +1603,7 @@ fun vitals(c) {
 
 fun vitals2(c, cost, regen) {
     p(p(p(p(p(p(p(c, 'e', g(c, 'e') - cost - (if (regen) { 0.02 } else { 0.0 })), 'h', if (regen) { fmin(100.0, g(c, 'h') + 0.05) } else { g(c, 'h') }),
-      'age', g(c, 'age') + 1), 'cool', g(c, 'cool') - 1), 'acd', g(c, 'acd') - 1), 'pain', if (g(c, 'pain') > 0) { g(c, 'pain') - 1 } else { 0 }), 'sv', g(c, 'sv'))
+      'age', g(c, 'age') + 1), 'cool', g(c, 'cool') - 1), 'acd', g(c, 'acd') - 1), 'pain', if (g(c, 'pain') > 0) { g(c, 'pain') - 1 } else { 0 }), 'ate', if (num(g(c, 'ate')) > 0) { num(g(c, 'ate')) - 1 } else { 0 })
 }
 
 fun map_vitals(crs, acc) { if (length(crs) == 0) { acc } else { map_vitals(tl(crs), [vitals(hd(crs)) | acc]) } }
@@ -1700,7 +1702,7 @@ fun ped(tab, id, depth, pos, maxd) {
     }
 }
 
-fun eligible(c) { g(c, 'mate') == 1 && g(c, 'e') >= nth(g(c, 'ph'), 17) && g(c, 'age') >= 150 && g(c, 'cool') <= 0 }
+fun eligible(c) { g(c, 'mate') == 1 && g(c, 'e') >= nth(g(c, 'ph'), 17) && g(c, 'age') >= 120 && g(c, 'cool') <= 0 }
 
 fun mate_tuples(crs, acc) { if (length(crs) == 0) { acc } else { c = hd(crs)  mate_tuples(tl(crs), if (eligible(c)) { [{g(c, 'x'), g(c, 'y'), g(c, 'id')} | acc] } else { acc }) } }
 fun find_mate_in(crs, c, grid) {
@@ -1764,18 +1766,18 @@ fun breed_g(tab, world, s, ids, mgrid) {
                 born = length(g(s1, 'crs')) > length(g(s, 'crs'))
                 s2 = if (born) { p(s1, 'crs', pay(pay(g(s1, 'crs'), g(c, 'id'), 18.0, 1), g(o, 'id'), 18.0, 1)) } else { s1 }
                 breed_g(tab, world, s2, tl(ids), mgrid)
-            } else { if (g(c, 'e') >= 97.0 && g(c, 'age') >= 600) {
+            } else { if (g(c, 'e') >= 98.0 && g(c, 'age') >= 700) {
                 ga = gamete(g(c, 'ha'), g(c, 'hb'), nth(g(c, 'ph'), 10))
                 gb = gamete(g(c, 'ha'), g(c, 'hb'), nth(g(c, 'ph'), 10))
                 s1 = birth(tab, world, s, ga, gb, g(c, 'gen') + 1, g(c, 'sp'), clampw(g(c, 'x') + gauss() * 0.02), clampw(g(c, 'y') + gauss() * 0.02), 35.0, g(c, 'id'), g(c, 'id'), 2)
                 born = length(g(s1, 'crs')) > length(g(s, 'crs'))
-                breed_g(tab, world, if (born) { p(s1, 'crs', pay(g(s1, 'crs'), g(c, 'id'), 60.0, 1)) } else { s1 }, tl(ids), mgrid)
+                breed_g(tab, world, if (born) { p(s1, 'crs', pay(g(s1, 'crs'), g(c, 'id'), 75.0, 1)) } else { s1 }, tl(ids), mgrid)
             } else { breed_g(tab, world, s, tl(ids), mgrid) } }
         }
     }
 }
 
-fun pay(crs, id, cost, kid) { upd(crs, id, fun(c) { p(p(p(c, 'e', g(c, 'e') - cost), 'cool', 220), 'kids', g(c, 'kids') + kid) }) }
+fun pay(crs, id, cost, kid) { upd(crs, id, fun(c) { p(p(p(c, 'e', g(c, 'e') - cost), 'cool', 150), 'kids', g(c, 'kids') + kid) }) }
 
 fun ids_of(crs) { if (length(crs) == 0) { [] } else { [g(hd(crs), 'id') | ids_of(tl(crs))] } }
 
@@ -1801,6 +1803,34 @@ fun hunter_hap() {
     p(h, 'b', set_locus(set_locus(set_locus(g(h, 'b'), 5, 0.8), 3, 1.4), 0, 1.2))
 }
 fun set_locus(b, k, v) { if (k == 0) { [[v, nth(hd(b), 1)] | tl(b)] } else { [hd(b) | set_locus(tl(b), k - 1, v)] } }
+# Evolution 3 brains (they already steer to food) in brand-new random bodies. The body loci
+# 0-4 mean different things here (scale, rhythm, muscle strength, spike sharpness, eye acuity), so
+# they are drawn fresh; diet, looks, mutation rate, the learning rule and mating genes come along.
+fun seeded_founders(tab, world, s, k) {
+    path = ck_dir ++ "/brains.json"
+    if (file_exists(path) != 'true') { founders(tab, world, s, k) }
+    else {
+        d = json_decode(file_read(path))
+        lst = if (d == nil) { [] } else { list_or_empty(g(d, 'cr')) }
+        if (length(lst) == 0) { founders(tab, world, s, k) } else { sf_loop(tab, world, s, k, lst) }
+    }
+}
+fun sf_loop(tab, world, s, k, lst) {
+    if (k <= 0) { s }
+    else {
+        e = nth(lst, rndi(length(lst)))
+        ha = new_body(fix_hap(hd(e)))
+        hb = new_body(fix_hap(nth(e, 1)))
+        pos = free_pos(g(s, 'isl'), 20)
+        sf_loop(tab, world, birth(tab, world, s, ha, hb, 0, 0, hd(pos), nth(pos, 1), 70.0, 0, 0, 3), k - 1, lst)
+    }
+}
+fun new_body(h) {
+    fresh = rand_body(0)
+    %{b: app(Std.take(fresh, 5), drop_n(g(h, 'b'), 5)), n: g(h, 'n'), c: g(h, 'c'), m: rand_morph(2 + rndi(3), [])}
+}
+fun drop_n(l, k) { if (k <= 0 || length(l) == 0) { l } else { drop_n(tl(l), k - 1) } }
+
 fun founders(tab, world, s, k) { founders_from(tab, world, s, k, ancestors(6)) }
 fun founders_from(tab, world, s, k, ancs) {
     if (k <= 0) { s }
@@ -1977,7 +2007,7 @@ fun world_loop(tab, s) {
         seed = ck_dir ++ "/" ++ ck_name(e)
         s1 = if (file_exists(own) == 'true') { load(tab, self(), s, ck_name(isl)) }
              else { if (e >= 4) { s } else { if (file_exists(seed) == 'true') { load(tab, self(), s, ck_name(e)) } else { load(tab, self(), s, "latest.json") } } }
-        s2 = if (length(g(s1, 'crs')) == 0) { founders(tab, self(), p(s1, 'init', 1), 50) } else { s1 }
+        s2 = if (length(g(s1, 'crs')) == 0) { seeded_founders(tab, self(), p(s1, 'init', 1), 50) } else { s1 }
         drain_acks()
         world_loop(tab, p(s2, 'init', 1))
     } else { if (cmd == 'reset') {
@@ -2410,7 +2440,7 @@ fun main() {
     tab = make_tables(ets_new(), 16)
     cput(tab, 'pred_on', 1)
     cput(tab, 'plast', 1)
-    cput(tab, 'speed', 2)
+    cput(tab, 'speed', 3)
     cput(tab, 'sel', 0 - 1)
     ne = getenv("EVOLVE_ISLANDS")
     n0 = if (ne == nil || ne == "") { 4 } else { to_int(ne) }
