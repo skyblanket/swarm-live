@@ -17,7 +17,7 @@
   var TASKS = [
     { name: 'Swim to the light', sub: 'reach each glowing pellet; it is sensed exactly like food', unit: 'pellets' },
     { name: 'Chase', sub: 'catch the prey; it runs faster after every catch', unit: 'caught' },
-    { name: 'Fight', sub: 'a duel with its pool’s runner-up: spikes wound, armor protects', unit: 'score' }
+    { name: 'Fight', sub: 'a duel with its pool’s runner-up: spikes wound, armor protects (3× health)', unit: 'score' }
   ];
   var st = [null, null, null], trails = [[], [], []], cams = [null, null, null], preyPrev = null;
   var champ = null, stats = null;
@@ -385,6 +385,13 @@
       G.fillStyle = 'rgba(0,0,0,0.7)'; G.fillRect(fx - 26, fy - 1, 52, 8);
       for (var sg = 0; sg < 10; sg++) { G.fillStyle = sg < Math.ceil(hp * 10) ? (hp > 0.5 ? '#50e3c2' : hp > 0.25 ? '#f5a623' : '#ff5a5a') : '#2a2a2a'; G.fillRect(fx - 25 + sg * 5, fy, 4, 6); }
       G.font = '700 11px ui-sans-serif,-apple-system,sans-serif'; G.fillStyle = bi === 0 ? '#ffd36b' : '#c9c9c9'; G.fillText(bi === 0 ? 'CHAMPION' : 'RUNNER-UP', fx, fy - 6);
+    }
+    if (t === 2 && d.b.length > 1 && (d.b[0][2] <= 0 || d.b[1][2] <= 0)) {
+      G.font = '800 44px ui-sans-serif,-apple-system,sans-serif'; G.textAlign = 'center';
+      G.fillStyle = 'rgba(0,0,0,0.6)'; G.fillText('K.O.', W / 2 + 3, H / 2 + 3);
+      G.fillStyle = '#ff5a5a'; G.fillText('K.O.', W / 2, H / 2);
+      G.font = '600 13px ui-sans-serif,-apple-system,sans-serif'; G.fillStyle = '#ededed';
+      G.fillText((d.b[1][2] <= 0 ? 'the champion' : 'the runner-up') + ' wins — rematch next', W / 2, H / 2 + 24);
     }
     /* off-screen target arrow */
     if (d.tg) {

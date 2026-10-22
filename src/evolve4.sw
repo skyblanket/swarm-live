@@ -2506,7 +2506,7 @@ fun tr_new(ha, hb, id, x, y, hx, hy) {
       sight: fmax(0.05, nth(ph, 4)) + elem(st, 6) * 12.0, x: x, y: y, hx: hx, hy: hy, bhx: hx, bhy: hy, om: 0.0, tf: 0.0,
       cfg: ab_cfgs(ns, []), ws: in_lists(elem(pt, 2), ns, ns), as: zeros(n, []), vs: zeros(n, []),
       pl: [nth(ph, 11), nth(ph, 12), nth(ph, 13), nth(ph, 14), nth(ph, 15), nth(ph, 16)],
-      outs: [0.0, 0.0, 0.0, 0.0, 0.0], e: 70.0, h: 100.0, pain: 0, ate: 0, hits: 0.0, killer: 0, work: 0.0, nn: n}
+      outs: [0.0, 0.0, 0.0, 0.0, 0.0], e: 70.0, h: 100.0, hmax: 100.0, pain: 0, ate: 0, hits: 0.0, killer: 0, work: 0.0, nn: n}
 }
 fun take5(l) { [nth(l, 0), nth(l, 1), nth(l, 2), nth(l, 3), nth(l, 4)] }
 # think, then move: the same steps as act_one in the world
@@ -2545,7 +2545,7 @@ fun tr_sens(c, food, crt, threat, sz) {
 fun r3l(x, y) { [r3(x / WS), r3(y / WS)] }
 fun live_bodies(crs) {
     if (length(crs) == 0) { [] }
-    else { c = hd(crs)  [[Math.round(nth(g(c, 'ph'), 6)), body_flat(g(c, 'spec'), g(c, 'nodes'), []), Math.round(g(c, 'h')), g(c, 'pain'), r2(nth(g(c, 'outs'), 1)), r2(hd(g(c, 'outs'))), r2(nth(g(c, 'outs'), 2))] | live_bodies(tl(crs))] }
+    else { c = hd(crs)  [[Math.round(nth(g(c, 'ph'), 6)), body_flat(g(c, 'spec'), g(c, 'nodes'), []), Math.round(fmax(0.0, g(c, 'h')) * 100.0 / g(c, 'hmax')), g(c, 'pain'), r2(nth(g(c, 'outs'), 1)), r2(hd(g(c, 'outs'))), r2(nth(g(c, 'outs'), 2))] | live_bodies(tl(crs))] }
 }
 fun live_frame(task, tick, crs, tg, score, n) {
     LiveView.broadcast("arena", {'frame', json_encode(%{t: "ev", n: "live", d: %{task: task, tick: tick, T: if (task == 2) { 500 } else { ar_T() }, b: live_bodies(crs), tg: tg, sc: r2(score), n: n}})})
@@ -2631,17 +2631,22 @@ fun ch_loop(c, pr, caught, close, tick, seed, plast, live) {
     }
 }
 
-# ---- task 3: fight. Two genomes face each other; spikes wound on impact, armor divides it by 3 ----
+# ---- task 3: fight. Two genomes start 0.4 apart, facing each other; spikes wound on impact, armor divides it by 3.
+# Fighters get three times the world's health so a duel takes several exchanges (one hit of a long spiked limb can do 100) ----
+fun fi_new(ha, hb, id, x, hx) { c = tr_new(ha, hb, id, x, 0.8, hx, 0.0)  p(p(c, 'h', 300.0), 'hmax', 300.0) }
 fun t_fight(ha, hb, oa, ob, plast, live) {
-    a = tr_new(ha, hb, 1, 0.72, 0.8, 1.0, 0.0)
-    b = tr_new(oa, ob, 2, 0.88, 0.8, 0.0 - 1.0, 0.0)
+    a = fi_new(ha, hb, 1, 0.6, 1.0)
+    b = fi_new(oa, ob, 2, 1.0, 0.0 - 1.0)
     fi_loop(a, b, 0.0, 0, plast, live)
 }
 fun fi_sens(c, o) {
     tr_sens(c, nil, near_item(c, g(o, 'x'), g(o, 'y')), if (g(o, 'nspk') > 0) { 1.0 } else { 0.5 }, hd(g(o, 'ph')) - hd(g(c, 'ph')))
 }
 fun fi_loop(a, b, close, tick, plast, live) {
-    if (tick >= 500 || g(a, 'h') <= 0.0 || g(b, 'h') <= 0.0) { fi_score(a, b, close) }
+    if (tick >= 500 || g(a, 'h') <= 0.0 || g(b, 'h') <= 0.0) {
+        if (live > 0) { live_frame(2, tick, [a, b], nil, elem(fi_score(a, b, close), 0), 0) } else { 'x' }
+        fi_score(a, b, close)
+    }
     else {
         if (live > 0) { live_frame(2, tick, [a, b], nil, elem(fi_score(a, b, close), 0), 0) } else { 'x' }
         a1 = tr_move(a, fi_sens(a, b), tick, plast)
@@ -2655,8 +2660,8 @@ fun fi_loop(a, b, close, tick, plast, live) {
 }
 # damage dealt minus half the damage taken, 25 for a kill, and a little for staying close (so a first fighter has a gradient)
 fun fi_score(a, b, close) {
-    ta = 100.0 - fmax(0.0, g(a, 'h'))
-    tb = 100.0 - fmax(0.0, g(b, 'h'))
+    ta = (300.0 - fmax(0.0, g(a, 'h'))) / 3.0
+    tb = (300.0 - fmax(0.0, g(b, 'h'))) / 3.0
     cl = 5.0 * close / 500.0
     {tb - 0.5 * ta + (if (g(b, 'h') <= 0.0) { 25.0 } else { 0.0 }) + cl, ta - 0.5 * tb + (if (g(a, 'h') <= 0.0) { 25.0 } else { 0.0 }) + cl}
 }
@@ -2867,8 +2872,13 @@ fun showcase(hub, r) {
 }
 fun live_task(me, task, e, o, seed) {
     if (task == 0) { t_light(elem(e, 0), elem(e, 1), seed, 1, 1) }
-    else { if (task == 1) { t_chase(elem(e, 0), elem(e, 1), seed, 1, 1) } else { t_fight(elem(e, 0), elem(e, 1), elem(o, 0), elem(o, 1), 1, 1) } }
+    else { if (task == 1) { t_chase(elem(e, 0), elem(e, 1), seed, 1, 1) } else { live_bouts(e, o, timestamp(), 0) } }
     send(me, {'done'})
+}
+# a duel can end in a knockout long before the other two trials finish: keep showing rematches meanwhile
+fun live_bouts(e, o, t0, k) {
+    if (k >= 5 || (k > 0 && timestamp() - t0 > 15000)) { 'ok' }
+    else { t_fight(elem(e, 0), elem(e, 1), elem(o, 0), elem(o, 1), 1, 1)  sleep(1800)  live_bouts(e, o, t0, k + 1) }
 }
 fun wait_done(k) { if (k <= 0) { 'ok' } else { receive { {'done'} -> wait_done(k - 1)  after 60000 { 'timeout' } } } }
 

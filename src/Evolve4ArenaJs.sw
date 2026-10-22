@@ -26,7 +26,7 @@ fun part0() {
     "  var TASKS = [\n" ++
     "    { name: 'Swim to the light', sub: 'reach each glowing pellet; it is sensed exactly like food', unit: 'pellets' },\n" ++
     "    { name: 'Chase', sub: 'catch the prey; it runs faster after every catch', unit: 'caught' },\n" ++
-    "    { name: 'Fight', sub: 'a duel with its pool’s runner-up: spikes wound, armor protects', unit: 'score' }\n" ++
+    "    { name: 'Fight', sub: 'a duel with its pool’s runner-up: spikes wound, armor protects (3× health)', unit: 'score' }\n" ++
     "  ];\n" ++
     "  var st = [null, null, null], trails = [[], [], []], cams = [null, null, null], preyPrev = null;\n" ++
     "  var champ = null, stats = null;\n" ++
@@ -399,11 +399,22 @@ fun part1() {
     "      for (var sg = 0; sg < 10; sg++) { G.fillStyle = sg < Math.ceil(hp * 10) ? (hp > 0.5 ? '#50e3c2' : hp > 0.25 ? '#f5a623' : '#ff5a5a') : '#2a2a2a'; G.fillRect(fx - 25 + sg * 5, fy, 4, 6); }\n" ++
     "      G.font = '700 11px ui-sans-serif,-apple-system,sans-serif'; G.fillStyle = bi === 0 ? '#ffd36b' : '#c9c9c9'; G.fillText(bi === 0 ? 'CHAMPION' : 'RUNNER-UP', fx, fy - 6);\n" ++
     "    }\n" ++
+    "    if (t === 2 && d.b.length > 1 && (d.b[0][2] <= 0 || d.b[1][2] <= 0)) {\n" ++
+    "      G.font = '800 44px ui-sans-serif,-apple-system,sans-serif'; G.textAlign = 'center';\n" ++
+    "      G.fillStyle = 'rgba(0,0,0,0.6)'; G.fillText('K.O.', W / 2 + 3, H / 2 + 3);\n" ++
+    "      G.fillStyle = '#ff5a5a'; G.fillText('K.O.', W / 2, H / 2);\n" ++
+    "      G.font = '600 13px ui-sans-serif,-apple-system,sans-serif'; G.fillStyle = '#ededed';\n" ++
+    "      G.fillText((d.b[1][2] <= 0 ? 'the champion' : 'the runner-up') + ' wins — rematch next', W / 2, H / 2 + 24);\n" ++
+    "    }\n" ++
     "    /* off-screen target arrow */\n" ++
     "    if (d.tg) {\n" ++
     "      var ax = SX(d.tg[0] / 1000) * PX, ay = SY(d.tg[1] / 1000) * PX;\n" ++
     "      if (ax < 0 || ax > W || ay < 0 || ay > H) {\n" ++
     "        var ang = Math.atan2(ay - H / 2, ax - W / 2), qx = clamp(ax, 18, W - 18), qy = clamp(ay, 70, H - 18);\n" ++
+    ""
+}
+
+fun part2() {
     "        G.save(); G.translate(qx, qy); G.rotate(ang); G.fillStyle = t === 0 ? '#ffd36b' : '#ff9e7a';\n" ++
     "        G.beginPath(); G.moveTo(10, 0); G.lineTo(-6, -7); G.lineTo(-6, 7); G.closePath(); G.fill(); G.restore();\n" ++
     "      }\n" ++
@@ -411,10 +422,6 @@ fun part1() {
     "    var o2 = d.b[0];\n" ++
     "    G.textAlign = 'left'; G.fillStyle = 'rgba(200,200,200,0.85)'; G.font = '11px ui-monospace,SFMono-Regular,Menlo,monospace';\n" ++
     "    G.fillText('THRUST ' + bar(o2[4] / 100) + '  TURN ' + (o2[5] >= 0 ? '+' : '') + (o2[5] / 100).toFixed(2) + (t === 2 ? '  BITE ' + bar(o2[6] / 100) : ''), 14, H - 14);\n" ++
-    ""
-}
-
-fun part2() {
     "    var sc = $('ts' + t); if (sc) sc.textContent = t === 2 ? (d.sc / 100).toFixed(1) : String(d.n);\n" ++
     "    var pb = $('tp' + t); if (pb) pb.style.width = Math.round(100 * d.tick / d.T) + '%';\n" ++
     "  }\n" ++
