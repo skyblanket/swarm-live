@@ -1784,14 +1784,18 @@ fun ids_of(crs) { if (length(crs) == 0) { [] } else { [g(hd(crs), 'id') | ids_of
 # immigrants keep a dying world going: a champion's genome (selfed) or a fresh random one
 fun immigrate(tab, world, s) {
     h = g(s, 'hof')
+    seeds = list_or_empty(g(s, 'seeds'))
     pos = free_pos(g(s, 'isl'), 20)
-    if (length(h) > 0 && rndf() < 0.7) {
+    if (length(h) > 0 && rndf() < 0.6) {
         e = nth(h, rndi(length(h)))
         birth(tab, world, s, gamete(nth(e, 1), nth(e, 2), 1.0), gamete(nth(e, 1), nth(e, 2), 1.0), nth(e, 3), nth(e, 4), hd(pos), nth(pos, 1), 70.0, 0, 0, 3)
+    } else { if (length(seeds) > 0) {
+        e = nth(seeds, rndi(length(seeds)))
+        birth(tab, world, s, new_body(fix_hap(hd(e))), new_body(fix_hap(nth(e, 1))), 0, 0, hd(pos), nth(pos, 1), 70.0, 0, 0, 3)
     } else {
         fg = founder_genome()
         birth(tab, world, s, elem(fg, 0), elem(fg, 1), 0, 0, hd(pos), nth(pos, 1), 70.0, 0, 0, 3)
-    }
+    } }
 }
 
 # a new world is colonised by a few ancestral lineages, each founder a variant of one
@@ -1806,13 +1810,19 @@ fun set_locus(b, k, v) { if (k == 0) { [[v, nth(hd(b), 1)] | tl(b)] } else { [hd
 # Evolution 3 brains (they already steer to food) in brand-new random bodies. The body loci
 # 0-4 mean different things here (scale, rhythm, muscle strength, spike sharpness, eye acuity), so
 # they are drawn fresh; diet, looks, mutation rate, the learning rule and mating genes come along.
+# keep the seed brains in the island's state (also after resuming from a checkpoint), for immigrants
+fun load_seeds(s) {
+    path = ck_dir ++ "/brains.json"
+    if (file_exists(path) != 'true') { s }
+    else { d = json_decode(file_read(path))  if (d == nil) { s } else { p(s, 'seeds', list_or_empty(g(d, 'cr'))) } }
+}
 fun seeded_founders(tab, world, s, k) {
     path = ck_dir ++ "/brains.json"
     if (file_exists(path) != 'true') { founders(tab, world, s, k) }
     else {
         d = json_decode(file_read(path))
         lst = if (d == nil) { [] } else { list_or_empty(g(d, 'cr')) }
-        if (length(lst) == 0) { founders(tab, world, s, k) } else { sf_loop(tab, world, s, k, lst) }
+        if (length(lst) == 0) { founders(tab, world, s, k) } else { sf_loop(tab, world, p(s, 'seeds', lst), k, lst) }
     }
 }
 fun sf_loop(tab, world, s, k, lst) {
@@ -2007,7 +2017,7 @@ fun world_loop(tab, s) {
         seed = ck_dir ++ "/" ++ ck_name(e)
         s1 = if (file_exists(own) == 'true') { load(tab, self(), s, ck_name(isl)) }
              else { if (e >= 4) { s } else { if (file_exists(seed) == 'true') { load(tab, self(), s, ck_name(e)) } else { load(tab, self(), s, "latest.json") } } }
-        s2 = if (length(g(s1, 'crs')) == 0) { seeded_founders(tab, self(), p(s1, 'init', 1), 50) } else { s1 }
+        s2 = if (length(g(s1, 'crs')) == 0) { seeded_founders(tab, self(), p(s1, 'init', 1), 50) } else { load_seeds(s1) }
         drain_acks()
         world_loop(tab, p(s2, 'init', 1))
     } else { if (cmd == 'reset') {
