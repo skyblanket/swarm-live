@@ -29,6 +29,7 @@ module Main
 
 import LiveView
 import Evolve4Js
+import Evolve4ArenaJs
 import Math
 import Std
 
@@ -2037,6 +2038,20 @@ fun world_loop(tab, s) {
     } } }
 }
 
+# every 3000 ticks an island takes in one champion from the arena (checkpoints/evolve4/champions.json)
+fun release_champ(tab, world, s) {
+    path = ck_dir ++ "/champions.json"
+    d = if (file_exists(path) == 'true') { json_decode(read_text(path)) } else { nil }
+    lst = if (d == nil) { [] } else { list_or_empty(g(d, 'cr')) }
+    if (length(lst) == 0) { s }
+    else {
+        e = nth(lst, rndi(length(lst)))
+        pos = free_pos(g(s, 'isl'), 20)
+        s1 = birth(tab, world, s, fix_hap(hd(e)), fix_hap(nth(e, 1)), to_int(nth(e, 2)), 0, hd(pos), nth(pos, 1), 80.0, 0, 0, 4)
+        if (length(g(s1, 'crs')) > length(g(s, 'crs'))) { p(s1, 'evs', [[16, 0, Math.round(nth(g(hd(g(s1, 'crs')), 'ph'), 6)), to_int(nth(e, 2)), to_int(nth(e, 3)), 0] | g(s1, 'evs')]) } else { s1 }
+    }
+}
+
 # migrants arrive as messages from other island processes
 fun save_creature(c, s) {
     file_mkdir("checkpoints")
@@ -2124,7 +2139,8 @@ fun step(tab, s0x) {
     # the Toxic Marsh (island 1) gets no random immigrants: only real migrants from the other islands,
     # so whatever lives there has to adapt to the vents itself
     s5 = if (length(g(s4, 'crs')) < 20 && tick % 30 == 0 && env(g(s4, 'isl')) != 1) { immigrate(tab, self(), s4) } else { s4 }
-    s6a = if (tick % 40 == 0) { species_step(s5) } else { s5 }
+    s5c = if (tick % 3000 == (isl * 187) % 3000) { release_champ(tab, self(), s5) } else { s5 }
+    s6a = if (tick % 40 == 0) { species_step(s5c) } else { s5c }
     s6 = if (tick % 500 == 0) { p(p(s6a, 'hist', cap([app(hist_sample(s6a, tick), flee_sample(tab, s6a)) | g(s6a, 'hist')], 400)), 'eaten_mark', g(s6a, 'd_eaten')) } else { s6a }
     s7 = if (tick - g(s6, 'ck_tick') >= 4000) { save(s6, ck_name(isl)) } else { s6 }
     if (tick % 20 == 0 && isl == 0) { cput(tab, 'procs', num(map_get(swarm_stats(), 'processes'))) } else { 'x' }
@@ -2432,6 +2448,488 @@ fun render(assigns) {
         [])
 }
 
+# ------------------------------------------------------------
+# The arena (EVOLVE_MODE=arena, port 4018): directed evolution. Genomes are scored in short trials
+# on three tasks, each trial its own process (thousands run at once):
+#   light  swim to a glowing pellet, then the next one (it is sensed exactly like food)
+#   chase  catch a fleeing prey that gets faster after every catch (sensed like another creature)
+#   fight  a duel with another genome of the pool: spikes, armor and contact physics as in the world
+# Bodies, physics and the brain (same neurons, synapses and evolved learning rule) are the world's;
+# in a trial the brain runs inline in the trial's process instead of one process per neuron.
+# Each pool keeps its best few, breeds the rest from tournament winners (two parents, meiosis,
+# mutation), and writes its champion to checkpoints/evolve4/champions.json, where the open
+# world's islands pick champions up as immigrants.
+# ------------------------------------------------------------
+fun ar_pop() { 160 }
+fun ar_T() { 700 }
+fun ar_dir() { "checkpoints/arena" }
+fun hr(seed, k) { to_float(hsh(seed, k) % 10000) / 10000.0 }
+
+# ---- the brain, inline: per neuron {type, bias, tau}, its synapses [[key, kind, w]], activation, membrane ----
+fun ab_cfgs(ns, acc) { if (length(ns) == 0) { rev(acc, []) } else { n = hd(ns)  ab_cfgs(tl(ns), [{nth(n, 1), nth(n, 2), nth(n, 3)} | acc]) } }
+fun zeros(k, acc) { if (k <= 0) { acc } else { zeros(k - 1, [0.0 | acc]) } }
+fun ab_pre(w, sens, ap, acc) {
+    if (length(w) == 0) { rev(acc, []) }
+    else { k = hd(hd(w))  ab_pre(tl(w), sens, ap, [if (k >= 1000) { nth(sens, k - 1000) } else { nth(ap, k) } | acc]) }
+}
+# one tick of every neuron; input from another neuron is its activation from the previous tick, as with the processes
+fun ab_step(cfgs, ws, as, vs, ap, sens, pl, plast, wacc, aacc, vacc) {
+    if (length(cfgs) == 0) { {rev(wacc, []), rev(aacc, []), rev(vacc, [])} }
+    else {
+        cf = hd(cfgs)
+        w = hd(ws)
+        a = hd(as)
+        v = hd(vs)
+        pres = ab_pre(w, sens, ap, [])
+        xm = sum_in(w, pres, 0.0, 0.0)
+        ty = elem(cf, 0)
+        tau = elem(cf, 2)
+        x = elem(xm, 0) + elem(cf, 1)
+        spike = ty == 2 && v * (1.0 - 1.0 / tau) + x >= 1.0
+        a2 = if (ty == 2) { if (spike) { 1.0 } else { 0.0 } } else { a + (tanh(x) - a) / tau }
+        v2 = if (ty == 2) { if (spike) { 0.0 } else { fmax(0.0 - 1.0, v * (1.0 - 1.0 / tau) + x) } } else { 0.0 }
+        eta = hd(pl)
+        w2 = if (plast == 1 && eta > 0.002) { learn(w, pres, a2, eta * tanh(nth(pl, 5) + elem(xm, 1)), nth(pl, 1), nth(pl, 2), nth(pl, 3), nth(pl, 4)) } else { w }
+        ab_step(tl(cfgs), tl(ws), tl(as), tl(vs), ap, sens, pl, plast, [w2 | wacc], [a2 | aacc], [v2 | vacc])
+    }
+}
+
+# ---- a trial body ----
+fun tr_new(ha, hb, id, x, y, hx, hy) {
+    pt = phenotype(ha, hb)
+    ph = elem(pt, 0)
+    ns = elem(pt, 1)
+    spec = build_spec(ph, expr_morph(list_or_empty(g(ha, 'm')), list_or_empty(g(hb, 'm'))))
+    st = body_stats(spec)
+    n = length(ns)
+    %{id: id, sp: id, ph: ph, spec: spec, nodes: layout(spec, x, y, hx, hy), mass: elem(st, 0), nspk: elem(st, 2),
+      sight: fmax(0.05, nth(ph, 4)) + elem(st, 6) * 12.0, x: x, y: y, hx: hx, hy: hy, bhx: hx, bhy: hy, om: 0.0, tf: 0.0,
+      cfg: ab_cfgs(ns, []), ws: in_lists(elem(pt, 2), ns, ns), as: zeros(n, []), vs: zeros(n, []),
+      pl: [nth(ph, 11), nth(ph, 12), nth(ph, 13), nth(ph, 14), nth(ph, 15), nth(ph, 16)],
+      outs: [0.0, 0.0, 0.0, 0.0, 0.0], e: 70.0, h: 100.0, pain: 0, ate: 0, hits: 0.0, killer: 0, work: 0.0, nn: n}
+}
+fun take5(l) { [nth(l, 0), nth(l, 1), nth(l, 2), nth(l, 3), nth(l, 4)] }
+# think, then move: the same steps as act_one in the world
+fun tr_move(c, sens, tick, plast) {
+    r0 = ab_step(g(c, 'cfg'), g(c, 'ws'), g(c, 'as'), g(c, 'vs'), g(c, 'as'), sens, g(c, 'pl'), plast, [], [], [])
+    o = take5(elem(r0, 1))
+    thrust = fmax(0.0, nth(o, 1))
+    tf = 0.75 * g(c, 'tf') + 0.25 * hd(o)
+    r = physics(g(c, 'spec'), g(c, 'nodes'), g(c, 'bhx'), g(c, 'bhy'), g(c, 'om'), g(c, 'ph'), thrust, tf, tick + g(c, 'id'), 1.0, [], g(c, 'mass'))
+    shx0 = 0.8 * g(c, 'hx') + 0.2 * elem(r, 1)
+    shy0 = 0.8 * g(c, 'hy') + 0.2 * elem(r, 2)
+    shl = Math.sqrt(shx0 * shx0 + shy0 * shy0) + 0.000001
+    nodes = elem(r, 0)
+    core = hd(nodes)
+    m1 = p(p(p(p(p(p(p(p(c, 'nodes', nodes), 'x', elem(core, 0)), 'y', elem(core, 1)), 'bhx', elem(r, 1)), 'bhy', elem(r, 2)), 'hx', shx0 / shl), 'hy', shy0 / shl), 'om', elem(r, 4))
+    p(p(p(p(p(p(p(m1, 'tf', tf), 'outs', o), 'ws', elem(r0, 0)), 'as', elem(r0, 1)), 'vs', elem(r0, 2)), 'work', g(c, 'work') + elem(r, 3)), 'pain', if (g(c, 'pain') > 0) { g(c, 'pain') - 1 } else { 0 })
+}
+fun near_item(c, tx, ty) { dx = tx - g(c, 'x')  dy = ty - g(c, 'y')  [Math.sqrt(dx * dx + dy * dy), dx, dy] }
+fun dist_to(c, tx, ty) { dx = tx - g(c, 'x')  dy = ty - g(c, 'y')  Math.sqrt(dx * dx + dy * dy) }
+# the world's 23 senses; in a trial only some of them have something to report
+fun tr_sens(c, food, crt, threat, sz) {
+    sight = g(c, 'sight')
+    hx = g(c, 'hx')
+    hy = g(c, 'hy')
+    fv = see(food, sight, hx, hy)
+    cv = see(crt, sight, hx, hy)
+    hv = if (threat > 0.0) { see(crt, sight * 1.3, hx, hy) } else { [0.0, 0.0] }
+    seen = crt != nil && hd(crt) <= sight
+    [1.0, hd(fv), nth(fv, 1), 0.0, 0.0, hd(cv), nth(cv, 1), 0.0, if (seen) { sz } else { 0.0 }, 0.0,
+     hd(hv), nth(hv, 1), if (crt != nil && hd(crt) <= sight * 1.3) { threat } else { 0.0 },
+     1.0 - fmin(wall_t(g(c, 'x'), g(c, 'y'), hx, hy), 0.25) / 0.25, g(c, 'e') / 100.0, g(c, 'h') / 100.0, if (g(c, 'pain') > 0) { 1.0 } else { 0.0 }, 0.0,
+     0.0, 0.0, 0.0, 0.0, if (g(c, 'ate') > 0) { 1.0 } else { 0.0 }]
+}
+
+# ---- live replays: the showcase runs a champion's trials in real time and streams them ----
+fun r3l(x, y) { [r3(x / WS), r3(y / WS)] }
+fun live_bodies(crs) {
+    if (length(crs) == 0) { [] }
+    else { c = hd(crs)  [[Math.round(nth(g(c, 'ph'), 6)), body_flat(g(c, 'spec'), g(c, 'nodes'), []), Math.round(g(c, 'h')), g(c, 'pain'), r2(nth(g(c, 'outs'), 1)), r2(hd(g(c, 'outs'))), r2(nth(g(c, 'outs'), 2))] | live_bodies(tl(crs))] }
+}
+fun live_frame(task, tick, crs, tg, score, n) {
+    LiveView.broadcast("arena", {'frame', json_encode(%{t: "ev", n: "live", d: %{task: task, tick: tick, T: if (task == 2) { 500 } else { ar_T() }, b: live_bodies(crs), tg: tg, sc: r2(score), n: n}})})
+    sleep(25)
+}
+
+# ---- task 1: swim to the light ----
+fun light_target(seed, k, x, y) {
+    a = hr(seed, k * 2) * 6.2832
+    d = 0.12 + hr(seed, k * 2 + 1) * 0.16
+    {clampf(x + Math.cos(a) * d, 0.15, WS - 0.15), clampf(y + Math.sin(a) * d, 0.15, WS - 0.15)}
+}
+fun t_light(ha, hb, seed, plast, live) {
+    c = tr_new(ha, hb, 1, 0.8, 0.8, 1.0, 0.0)
+    f = light_target(seed, 0, 0.8, 0.8)
+    lt_loop(c, f, dist_to(c, elem(f, 0), elem(f, 1)), 0, 0, seed, plast, live)
+}
+fun lt_loop(c, f, d0, got, tick, seed, plast, live) {
+    fx = elem(f, 0)
+    fy = elem(f, 1)
+    d = dist_to(c, fx, fy)
+    sc = to_float(got) + fmax(0.0, 1.0 - d / d0)
+    if (tick >= ar_T()) { sc }
+    else {
+        if (live > 0) { live_frame(0, tick, [c], r3l(fx, fy), sc, got) } else { 'x' }
+        c1 = tr_move(c, tr_sens(c, near_item(c, fx, fy), nil, 0.0, 0.0), tick, plast)
+        hit = touches(mouths(c1), fx, fy)
+        c2 = p(p(c1, 'ate', if (hit) { 25 } else { g(c1, 'ate') - 1 }), 'e', fmin(100.0, g(c1, 'e') - 0.02 + (if (hit) { 15.0 } else { 0.0 })))
+        f2 = if (hit) { light_target(seed, got + 1, g(c2, 'x'), g(c2, 'y')) } else { f }
+        d02 = if (hit) { dist_to(c2, elem(f2, 0), elem(f2, 1)) } else { d0 }
+        lt_loop(c2, f2, d02, if (hit) { got + 1 } else { got }, tick + 1, seed, plast, live)
+    }
+}
+
+# ---- task 2: chase. The prey {x, y, hx, hy} wanders, flees when the hunter comes close, and is faster after each catch ----
+fun prey_speed(caught) { 0.0005 + 0.0002 * to_float(caught) }
+fun prey_step(pr, c, caught, seed, tick) {
+    dx = elem(pr, 0) - g(c, 'x')
+    dy = elem(pr, 1) - g(c, 'y')
+    d = Math.sqrt(dx * dx + dy * dy) + 0.000001
+    wh = rotate_h(elem(pr, 2), elem(pr, 3), (hr(seed, 1000 + tick / 20) - 0.5) * 0.08)
+    flee = d < 0.22
+    hx0 = if (flee) { elem(wh, 0) * 0.4 + dx / d } else { elem(wh, 0) }
+    hy0 = if (flee) { elem(wh, 1) * 0.4 + dy / d } else { elem(wh, 1) }
+    hl = Math.sqrt(hx0 * hx0 + hy0 * hy0) + 0.000001
+    sp = prey_speed(caught) * (if (flee) { 1.0 } else { 0.4 })
+    nx = elem(pr, 0) + hx0 / hl * sp
+    ny = elem(pr, 1) + hy0 / hl * sp
+    out = nx < 0.3 || nx > 1.3 || ny < 0.3 || ny > 1.3
+    bx = 0.8 - nx
+    by = 0.8 - ny
+    bl = Math.sqrt(bx * bx + by * by) + 0.000001
+    {clampf(nx, 0.3, 1.3), clampf(ny, 0.3, 1.3), if (out) { bx / bl } else { hx0 / hl }, if (out) { by / bl } else { hy0 / hl }}
+}
+fun touch_any(nodes, spec, x, y) {
+    if (length(nodes) == 0) { false }
+    else {
+        n = hd(nodes)
+        r = elem(hd(spec), 0) + 0.008
+        dx = elem(n, 0) - x
+        dy = elem(n, 1) - y
+        if (dx * dx + dy * dy < r * r) { true } else { touch_any(tl(nodes), tl(spec), x, y) }
+    }
+}
+fun t_chase(ha, hb, seed, plast, live) {
+    c = tr_new(ha, hb, 1, 0.8, 0.8, 1.0, 0.0)
+    a = hr(seed, 101) * 6.2832
+    ch_loop(c, {0.8 + Math.cos(a) * 0.15, 0.8 + Math.sin(a) * 0.15, Math.cos(a), Math.sin(a)}, 0, 0.0, 0, seed, plast, live)
+}
+fun ch_loop(c, pr, caught, close, tick, seed, plast, live) {
+    px = elem(pr, 0)
+    py = elem(pr, 1)
+    sc = to_float(caught) + close / to_float(ar_T())
+    if (tick >= ar_T()) { sc }
+    else {
+        if (live > 0) { live_frame(1, tick, [c], r3l(px, py), sc, caught) } else { 'x' }
+        c1 = tr_move(c, tr_sens(c, nil, near_item(c, px, py), 0.0, 0.0 - 0.3), tick, plast)
+        hit = touch_any(g(c1, 'nodes'), g(c1, 'spec'), px, py)
+        a = hr(seed, 2000 + caught) * 6.2832
+        pr1 = if (hit) { {clampf(g(c1, 'x') + Math.cos(a) * 0.2, 0.3, 1.3), clampf(g(c1, 'y') + Math.sin(a) * 0.2, 0.3, 1.3), Math.cos(a), Math.sin(a)} } else { prey_step(pr, c1, caught, seed, tick) }
+        d = dist_to(c1, elem(pr1, 0), elem(pr1, 1))
+        ch_loop(c1, pr1, if (hit) { caught + 1 } else { caught }, close + 1.0 - fmin(d, 0.4) / 0.4, tick + 1, seed, plast, live)
+    }
+}
+
+# ---- task 3: fight. Two genomes face each other; spikes wound on impact, armor divides it by 3 ----
+fun t_fight(ha, hb, oa, ob, plast, live) {
+    a = tr_new(ha, hb, 1, 0.72, 0.8, 1.0, 0.0)
+    b = tr_new(oa, ob, 2, 0.88, 0.8, 0.0 - 1.0, 0.0)
+    fi_loop(a, b, 0.0, 0, plast, live)
+}
+fun fi_sens(c, o) {
+    tr_sens(c, nil, near_item(c, g(o, 'x'), g(o, 'y')), if (g(o, 'nspk') > 0) { 1.0 } else { 0.5 }, hd(g(o, 'ph')) - hd(g(c, 'ph')))
+}
+fun fi_loop(a, b, close, tick, plast, live) {
+    if (tick >= 500 || g(a, 'h') <= 0.0 || g(b, 'h') <= 0.0) { fi_score(a, b, close) }
+    else {
+        if (live > 0) { live_frame(2, tick, [a, b], nil, elem(fi_score(a, b, close), 0), 0) } else { 'x' }
+        a1 = tr_move(a, fi_sens(a, b), tick, plast)
+        b1 = tr_move(b, fi_sens(b, a), tick, plast)
+        r = contact_step([a1, b1])
+        a2 = find_id(r, 1)
+        b2 = find_id(r, 2)
+        d = dist_to(a2, g(b2, 'x'), g(b2, 'y'))
+        fi_loop(a2, b2, close + 1.0 - fmin(d, 0.4) / 0.4, tick + 1, plast, live)
+    }
+}
+# damage dealt minus half the damage taken, 25 for a kill, and a little for staying close (so a first fighter has a gradient)
+fun fi_score(a, b, close) {
+    ta = 100.0 - fmax(0.0, g(a, 'h'))
+    tb = 100.0 - fmax(0.0, g(b, 'h'))
+    cl = 5.0 * close / 500.0
+    {tb - 0.5 * ta + (if (g(b, 'h') <= 0.0) { 25.0 } else { 0.0 }) + cl, ta - 0.5 * tb + (if (g(a, 'h') <= 0.0) { 25.0 } else { 0.0 }) + cl}
+}
+
+# ---- trial processes ----
+fun trial_solo(pool, i, ha, hb, seed, plast) {
+    l = t_light(ha, hb, seed, plast, 0)
+    ch = t_chase(ha, hb, seed, plast, 0)
+    send(pool, {'ts', i, l, ch})
+}
+fun trial_duel(pool, i, j, a, b, plast) {
+    r = t_fight(elem(a, 0), elem(a, 1), elem(b, 0), elem(b, 1), plast, 0)
+    send(pool, {'tf', i, j, elem(r, 0), elem(r, 1)})
+}
+
+# ---- a pool: a population of genomes {ha, hb, id, gen, mutation rate} ----
+fun mr_of(ha, hb) { nth(expr_body(g(ha, 'b'), g(hb, 'b'), 0), 10) }
+# trials run as jobs, at most ARENA_PAR at a time per pool, so the schedulers keep room for the web server
+fun ar_par() { v = getenv("ARENA_PAR")  if (v == nil || v == "") { 4 } else { to_int(v) } }
+fun solo_jobs(k, n, acc) { if (k >= n) { rev(acc, []) } else { solo_jobs(k + 1, n, [{'s', k, 0} | acc]) } }
+fun duel_jobs(perm, acc) { if (length(perm) < 2) { rev(acc, []) } else { duel_jobs(tl(tl(perm)), [{'d', hd(perm), hd(tl(perm))} | acc]) } }
+fun shuffle(n) { rkeys(Std.sort_by(rk_acc(0, n, []), fun(t) { elem(t, 0) }), []) }
+fun rk_acc(k, n, acc) { if (k >= n) { acc } else { rk_acc(k + 1, n, [{rndf(), k} | acc]) } }
+fun rkeys(l, acc) { if (length(l) == 0) { rev(acc, []) } else { rkeys(tl(l), [elem(hd(l), 1) | acc]) } }
+# ctx = {pool pid, population, seed, plasticity}
+fun run_job(ctx, job) {
+    pop = elem(ctx, 1)
+    i = elem(job, 1)
+    if (elem(job, 0) == 's') { e = nth(pop, i)  spawn(trial_solo(elem(ctx, 0), i, elem(e, 0), elem(e, 1), elem(ctx, 2), elem(ctx, 3))) }
+    else { j = elem(job, 2)  spawn(trial_duel(elem(ctx, 0), i, j, nth(pop, i), nth(pop, j), elem(ctx, 3))) }
+}
+fun start_jobs(ctx, jobs, k) { if (k <= 0 || length(jobs) == 0) { jobs } else { run_job(ctx, hd(jobs))  start_jobs(ctx, tl(jobs), k - 1) } }
+fun collect(ctx, jobs, k, L, C, F, N, imm) {
+    if (k <= 0) { {L, C, F, N, imm} }
+    else {
+        receive {
+            {'ts', i, l, c} -> collect(ctx, start_jobs(ctx, jobs, 1), k - 1, map_put(L, i, l), map_put(C, i, c), F, N, imm)
+            {'tf', i, j, si, sj} -> collect(ctx, start_jobs(ctx, jobs, 1), k - 1, L, C, map_put(map_put(F, i, numf(map_get(F, i)) + si), j, numf(map_get(F, j)) + sj),
+                                            map_put(map_put(N, i, num(map_get(N, i)) + 1), j, num(map_get(N, j)) + 1), imm)
+            {'mig', ha, hb, gen} -> collect(ctx, jobs, k, L, C, F, N, [{ha, hb, gen} | imm])
+            after 180000 { {L, C, F, N, imm} }
+        }
+    }
+}
+fun count_below(lst, v, acc) { if (length(lst) == 0) { acc } else { count_below(tl(lst), v, if (hd(lst) < v) { acc + 1 } else { acc }) } }
+fun ranks(vals, all, n, acc) { if (length(vals) == 0) { rev(acc, []) } else { ranks(tl(vals), all, n, [to_float(count_below(all, hd(vals), 0)) / to_float(n) | acc]) } }
+fun score_lists(k, n, L, C, F, N, ls, cs, fs) {
+    if (k < 0) { {ls, cs, fs} }
+    else {
+        nf = num(map_get(N, k))
+        score_lists(k - 1, n, L, C, F, N, [numf(map_get(L, k)) | ls], [numf(map_get(C, k)) | cs], [if (nf > 0) { numf(map_get(F, k)) / to_float(nf) } else { 0.0 - 50.0 } | fs])
+    }
+}
+# rows {fitness, index, light, chase, fight}; fitness is the mean of the three per-task ranks
+fun rows_of(k, ls, cs, fs, rl, rc, rf, acc) {
+    if (length(ls) == 0) { acc }
+    else { rows_of(k + 1, tl(ls), tl(cs), tl(fs), tl(rl), tl(rc), tl(rf), [{(hd(rl) + hd(rc) + hd(rf)) / 3.0, k, hd(ls), hd(cs), hd(fs)} | acc]) }
+}
+fun tourney(rows, k, best) {
+    if (k <= 0) { elem(best, 1) }
+    else { r = nth(rows, rndi(length(rows)))  tourney(rows, k - 1, if (best == nil || elem(r, 0) > elem(best, 0)) { r } else { best }) }
+}
+fun breed_kids(pool, pop, rows, k, next_id, acc) {
+    if (k <= 0) { {acc, next_id} }
+    else {
+        a = nth(pop, tourney(rows, 4, nil))
+        b = nth(pop, tourney(rows, 4, nil))
+        ga = gamete(elem(a, 0), elem(a, 1), elem(a, 4))
+        gb = gamete(elem(b, 0), elem(b, 1), elem(b, 4))
+        breed_kids(pool, pop, rows, k - 1, next_id + 1, [{ga, gb, next_id, 1 + fmax(elem(a, 3), elem(b, 3)), mr_of(ga, gb)} | acc])
+    }
+}
+fun elites(pop, sorted, k, acc) { if (k <= 0 || length(sorted) == 0) { rev(acc, []) } else { elites(pop, tl(sorted), k - 1, [nth(pop, elem(hd(sorted), 1)) | acc]) } }
+fun imm_entries(lst, next_id, acc) {
+    if (length(lst) == 0) { {acc, next_id} }
+    else { m = hd(lst)  imm_entries(tl(lst), next_id + 1, [{elem(m, 0), elem(m, 1), next_id, elem(m, 2), mr_of(elem(m, 0), elem(m, 1))} | acc]) }
+}
+fun mean_of(l) { if (length(l) == 0) { 0.0 } else { sum_f(l, 0.0) / to_float(length(l)) } }
+fun sum_f(l, a) { if (length(l) == 0) { a } else { sum_f(tl(l), a + hd(l)) } }
+fun max_f(l, m) { if (length(l) == 0) { m } else { max_f(tl(l), fmax(m, hd(l))) } }
+
+fun pool_loop(hub, k, pop, gen, next_id, hist) {
+    seed = gen * 7919 + k * 104729 + 17
+    me = self()
+    n = length(pop)
+    t0 = timestamp()
+    jobs = app(duel_jobs(shuffle(n), []), app(duel_jobs(shuffle(n), []), solo_jobs(0, n, [])))
+    nd = length(jobs) - n
+    ctx = {me, pop, seed, 1}
+    r = collect(ctx, start_jobs(ctx, jobs, ar_par()), length(jobs), %{}, %{}, %{}, %{}, [])
+    sl = score_lists(n - 1, n, elem(r, 0), elem(r, 1), elem(r, 2), elem(r, 3), [], [], [])
+    ls = elem(sl, 0)
+    cs = elem(sl, 1)
+    fs = elem(sl, 2)
+    rows = rows_of(0, ls, cs, fs, ranks(ls, ls, n, []), ranks(cs, cs, n, []), ranks(fs, fs, n, []), [])
+    sorted = Std.sort_by(rows, fun(t) { 0.0 - elem(t, 0) })
+    best = hd(sorted)
+    second = hd(tl(sorted))
+    be = nth(pop, elem(best, 1))
+    h2 = cap([[gen, r2(max_f(ls, 0.0)), r2(max_f(cs, 0.0)), r2(max_f(fs, 0.0 - 99.0)), r2(mean_of(ls)), r2(mean_of(cs)), r2(mean_of(fs))] | hist], 300)
+    send(hub, {'gen', k, gen, {elem(be, 0), elem(be, 1), elem(best, 2), elem(best, 3), elem(best, 4), elem(be, 3), elem(be, 2)}, nth(pop, elem(second, 1)), hd(h2), n + nd, timestamp() - t0})
+    im = imm_entries(elem(r, 4), next_id, [])
+    el = elites(pop, sorted, 6, [])
+    kids = breed_kids(k, pop, rows, n - length(el) - length(elem(im, 0)), elem(im, 1), [])
+    pop2 = app(el, app(elem(im, 0), elem(kids, 0)))
+    if (gen % 5 == 4) { save_pool(k, pop2, gen + 1, elem(kids, 1), h2) } else { 'x' }
+    pool_loop(hub, k, pop2, gen + 1, elem(kids, 1), h2)
+}
+
+fun pool_name(k) { ar_dir() ++ "/pool-" ++ to_string(k) ++ ".json" }
+fun save_pool(k, pop, gen, next_id, hist) {
+    file_atomic_write(pool_name(k), json_encode(%{gen: gen, next_id: next_id, hist: hist, pop: pop_rows(pop)}))
+}
+fun pop_rows(pop) { if (length(pop) == 0) { [] } else { e = hd(pop)  [[elem(e, 0), elem(e, 1), elem(e, 2), elem(e, 3)] | pop_rows(tl(pop))] } }
+fun pop_of_rows(l, acc) {
+    if (length(l) == 0) { rev(acc, []) }
+    else { r = hd(l)  ha = fix_hap(hd(r))  hb = fix_hap(nth(r, 1))  pop_of_rows(tl(l), [{ha, hb, to_int(nth(r, 2)), to_int(nth(r, 3)), mr_of(ha, hb)} | acc]) }
+}
+# a new pool starts from the creatures of one open-world island (their evolved bodies and brains)
+fun seed_pool(k) {
+    path = ck_dir ++ "/island-" ++ to_string(k) ++ ".json"
+    d = if (file_exists(path) == 'true') { json_decode(read_text(path)) } else { nil }
+    lst = if (d == nil) { [] } else { list_or_empty(g(d, 'cr')) }
+    base = seed_rows(lst, k * 10000000, ar_pop(), [])
+    fill_pool(base, k * 10000000 + length(base), ar_pop() - length(base))
+}
+fun seed_rows(l, id, n, acc) {
+    if (length(l) == 0 || n <= 0) { rev(acc, []) }
+    else { r = hd(l)  ha = fix_hap(hd(r))  hb = fix_hap(nth(r, 1))  seed_rows(tl(l), id + 1, n - 1, [{ha, hb, id, to_int(nth(r, 2)), mr_of(ha, hb)} | acc]) }
+}
+fun fill_pool(pop, id, n) {
+    if (n <= 0) { pop }
+    else {
+        e = if (length(pop) > 0) { nth(pop, rndi(length(pop))) } else { nil }
+        g2 = if (e == nil) { fg = founder_genome()  {elem(fg, 0), elem(fg, 1), id, 0, 1.0} } else { ga = gamete(elem(e, 0), elem(e, 1), 1.0)  gb = gamete(elem(e, 0), elem(e, 1), 1.0)  {ga, gb, id, elem(e, 3), mr_of(ga, gb)} }
+        fill_pool(app(pop, [g2]), id + 1, n - 1)
+    }
+}
+fun pool_start(hub, k) {
+    send(hub, {'hello', k, self()})
+    path = pool_name(k)
+    d = if (file_exists(path) == 'true') { json_decode(read_text(path)) } else { nil }
+    if (d == nil) { pool_loop(hub, k, seed_pool(k), 0, k * 10000000 + ar_pop(), []) }
+    else { pool_loop(hub, k, pop_of_rows(g(d, 'pop'), []), to_int(g(d, 'gen')), to_int(g(d, 'next_id')), fix_hist(g(d, 'hist'))) }
+}
+
+# ---- the hub: collects each pool's champion, writes the champions file, migrates champions between pools, feeds the UI ----
+fun champ_rows(best, k, n, acc) {
+    if (k >= n) { rev(acc, []) }
+    else { e = map_get(best, k)  champ_rows(best, k + 1, n, if (e == nil) { acc } else { [[elem(e, 0), elem(e, 1), elem(e, 5), k, r2(elem(e, 2)), r2(elem(e, 3)), r2(elem(e, 4))] | acc] }) }
+}
+fun pool_rows(s, k, n) {
+    if (k >= n) { [] }
+    else {
+        e = map_get(g(s, 'best'), k)
+        [[k, num(map_get(g(s, 'gens'), k)), if (e == nil) { [] } else { [r2(elem(e, 2)), r2(elem(e, 3)), r2(elem(e, 4)), elem(e, 5)] }, list_or_empty(map_get(g(s, 'last'), k)), num(map_get(g(s, 'ms'), k))] | pool_rows(s, k + 1, n)]
+    }
+}
+fun hist_rows(s, k, n) { if (k >= n) { [] } else { [list_or_empty(map_get(g(s, 'hist'), k)) | hist_rows(s, k + 1, n)] } }
+fun hub_loop(s) {
+    receive {
+        {'hello', k, pid} -> hub_loop(p(s, 'pids', map_put(g(s, 'pids'), k, pid)))
+        {'gen', k, gen, be, second, hrow, ntr, ms} ->
+            n = g(s, 'n')
+            s1 = p(p(p(p(p(p(p(s, 'best', map_put(g(s, 'best'), k, be)), 'rival', map_put(g(s, 'rival'), k, second)), 'gens', map_put(g(s, 'gens'), k, gen + 1)),
+                 'hist', map_put(g(s, 'hist'), k, cap([hrow | list_or_empty(map_get(g(s, 'hist'), k))], 300))), 'trials', g(s, 'trials') + ntr), 'last', map_put(g(s, 'last'), k, hrow)), 'ms', map_put(g(s, 'ms'), k, ms))
+            # every 8 generations a pool's champion also moves to the next pool
+            if (gen % 8 == 7 && n > 1) { dst = map_get(g(s, 'pids'), (k + 1) % n)  if (dst == nil) { 'x' } else { send(dst, {'mig', elem(be, 0), elem(be, 1), elem(be, 5)}) } } else { 'x' }
+            now = timestamp()
+            s2 = if (now - g(s, 'wr') > 15000) { file_atomic_write(ck_dir ++ "/champions.json", json_encode(%{cr: champ_rows(g(s1, 'best'), 0, n, [])}))  p(s1, 'wr', now) } else { s1 }
+            hub_loop(s2)
+        {'tick'} ->
+            n = g(s, 'n')
+            LiveView.broadcast("arena", {'frame', json_encode(%{t: "ev", n: "stats", d: %{pools: pool_rows(s, 0, n), hist: hist_rows(s, 0, n), trials: g(s, 'trials'),
+                up: (timestamp() - g(s, 't0')) / 1000, procs: num(map_get(swarm_stats(), 'processes')), show: g(s, 'show')}})})
+            hub_loop(s)
+        {'get', from, r} ->
+            n = g(s, 'n')
+            k = r % n
+            e = map_get(g(s, 'best'), k)
+            send(from, {'champ', e, map_get(g(s, 'rival'), k), k})
+            hub_loop(if (e == nil) { s } else { p(s, 'show', [k, elem(e, 6), elem(e, 5), r2(elem(e, 2)), r2(elem(e, 3)), r2(elem(e, 4))]) })
+        _o -> hub_loop(s)
+    }
+}
+
+# the showcase: one pool's champion at a time runs all three tasks live (the fight is against its pool's runner-up)
+fun showcase(hub, r) {
+    send(hub, {'get', self(), r})
+    receive {
+        {'champ', e, o, k} ->
+            if (e == nil || o == nil) { sleep(2000)  showcase(hub, r + 1) }
+            else {
+                me = self()
+                seed = random_int(1, 1000000)
+                c = tr_new(elem(e, 0), elem(e, 1), 1, 0.8, 0.8, 1.0, 0.0)
+                LiveView.broadcast("arena", {'frame', json_encode(%{t: "ev", n: "champ", d: %{k: k, id: elem(e, 6), gen: elem(e, 5), sc: [r2(elem(e, 2)), r2(elem(e, 3)), r2(elem(e, 4))],
+                    body: live_bodies([c]), nn: g(c, 'nn'), nc: length(elem(phenotype(elem(e, 0), elem(e, 1)), 2)), ph: r2l(g(c, 'ph')), mass: r2(g(c, 'mass'))}})})
+                spawn(live_task(me, 0, e, o, seed))
+                spawn(live_task(me, 1, e, o, seed))
+                spawn(live_task(me, 2, e, o, seed))
+                wait_done(3)
+                sleep(1500)
+                showcase(hub, r + 1)
+            }
+        after 5000 { showcase(hub, r) }
+    }
+}
+fun live_task(me, task, e, o, seed) {
+    if (task == 0) { t_light(elem(e, 0), elem(e, 1), seed, 1, 1) }
+    else { if (task == 1) { t_chase(elem(e, 0), elem(e, 1), seed, 1, 1) } else { t_fight(elem(e, 0), elem(e, 1), elem(o, 0), elem(o, 1), 1, 1) } }
+    send(me, {'done'})
+}
+fun wait_done(k) { if (k <= 0) { 'ok' } else { receive { {'done'} -> wait_done(k - 1)  after 60000 { 'timeout' } } } }
+
+fun hub_ticker(hub) { sleep(1000)  send(hub, {'tick'})  hub_ticker(hub) }
+fun start_pools(hub, k, n) { if (k >= n) { 'ok' } else { spawn(pool_start(hub, k))  start_pools(hub, k + 1, n) } }
+
+fun ar_mount(params) {
+    if (LiveView.connected(params) == 'true') { LiveView.subscribe("arena") } else { 'noop' }
+    %{}
+}
+fun ar_event(name, value, assigns) { assigns }
+fun ar_css() {
+    "<style>.amain{flex:1;min-height:0;overflow:auto;padding:14px 20px 20px;display:flex;flex-direction:column;gap:14px}" ++
+    ".tasks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.task{position:relative;height:430px;overflow:hidden;background:#04060a}.task canvas{position:absolute;inset:0;width:100%;height:100%}" ++
+    ".task .th{position:absolute;left:14px;top:12px;right:14px;pointer-events:none}.task .th .big{font-size:17px;font-weight:600;letter-spacing:-.01em}.task .th .sub{font-size:12px;color:var(--mu);margin-top:2px}" ++
+    ".task .sc{position:absolute;right:14px;top:12px;text-align:right;font-variant-numeric:tabular-nums}.task .sc b{display:block;font-size:26px;font-weight:600;letter-spacing:-.02em}.task .sc span{font-size:11px;color:var(--mu)}" ++
+    ".task .pb{position:absolute;left:0;right:0;bottom:0;height:3px;background:#111}.task .pb i{display:block;height:100%;background:var(--amber)}" ++
+    ".row2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:14px}.row2 .card{padding:14px 16px}" ++
+    ".champ{display:flex;gap:16px;align-items:center}.champ canvas{width:120px;height:120px;border-radius:12px;background:#07090d;border:1px solid var(--line);flex:none}" ++
+    ".kv{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}.kv div{font-size:11px;color:var(--mu)}.kv b{display:block;font-size:16px;color:var(--tx);font-weight:600;font-variant-numeric:tabular-nums}" ++
+    "table.pt{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}.pt th{color:var(--mu);font-weight:500;text-align:right;padding:4px 6px;border-bottom:1px solid var(--line)}.pt td{text-align:right;padding:4px 6px;border-bottom:1px solid #141414}.pt th:first-child,.pt td:first-child{text-align:left}.pt tr.on td{color:var(--amber)}" ++
+    ".charts{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.charts canvas{width:100%;height:120px;display:block}.charts .k{font-size:12px;font-weight:600;margin-bottom:4px}" ++
+    "@media(max-width:1100px){body{overflow:auto}.tasks,.row2,.charts{grid-template-columns:1fr}}</style>"
+}
+
+fun ar_render(assigns) {
+    LiveView.h(
+        css() ++ ar_css() ++
+        "<header class=\"nav\"><div class=\"logo\">" ++
+        "<svg width=\"20\" height=\"20\" viewBox=\"0 0 10 10\" shape-rendering=\"crispEdges\"><path fill=\"#ffd36b\" d=\"M4 0h2v2H4zM4 8h2v2H4zM0 4h2v2H0zM8 4h2v2H8zM3 3h4v4H3z\"/></svg>" ++
+        "The Arena</div><span class=\"crumb\">directed evolution: bodies and brains scored on tasks, champions sent into Evolution 4</span>" ++
+        "<div class=\"pill ml\"><span class=\"dot\"></span><span id=\"o-tr\">0</span> trials &middot; <span id=\"o-procs\">0</span> processes</div></header>" ++
+        "<div class=\"amain\" id=\"amain\" sw-keep></div>",
+        [])
+}
+
+fun arena_main() {
+    file_mkdir("checkpoints")
+    file_mkdir(ar_dir())
+    file_mkdir(ck_dir)
+    ne = getenv("ARENA_POOLS")
+    n0 = if (ne == nil || ne == "") { 8 } else { to_int(ne) }
+    n = if (n0 < 1) { 1 } else { if (n0 > 32) { 32 } else { n0 } }
+    hub = spawn(hub_loop(%{n: n, pids: %{}, best: %{}, rival: %{}, hist: %{}, gens: %{}, last: %{}, ms: %{}, trials: 0, t0: timestamp(), bc: 0, wr: 0, show: []}))
+    register('arena_hub', hub)
+    start_pools(hub, 0, n)
+    spawn(hub_ticker(hub))
+    spawn(showcase(hub, 0))
+    LiveView.start(4018, [
+        {"/", %{
+            title: "The Arena",
+            js: Evolve4ArenaJs.js(),
+            mount: ar_mount,
+            render: ar_render,
+            handle_event: ar_event,
+            handle_info: handle_info
+        }}
+    ])
+}
+
+
 # if the world process ever dies (a panic), start a new one: it resumes from the last checkpoint
 fun watchdog(tab, isl) {
     cput(tab, k_isl + 100 + isl, timestamp())
@@ -2457,7 +2955,9 @@ fun watch(tab, isl, w) {
 
 fun start_islands(tab, k) { if (k >= nisl(tab)) { 'ok' } else { spawn(watchdog(tab, k))  start_islands(tab, k + 1) } }
 
-fun main() {
+fun main() { if (getenv("EVOLVE_MODE") == "arena") { arena_main() } else { world_main() } }
+
+fun world_main() {
     tab = make_tables(ets_new(), 16)
     cput(tab, 'pred_on', 1)
     cput(tab, 'plast', 1)

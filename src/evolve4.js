@@ -459,6 +459,7 @@
     else if (code === 6) { txt = 'A creature was eaten by another one (generation ' + fmtc(e[3]) + ')'; col = '#ff5a5a'; }
     else if (code === 14) { txt = 'A creature swam off to ' + islName(e[4]); col = '#5aa9ff'; }
     else if (code === 15) { txt = 'A migrant arrived from ' + islName(e[4]); col = '#5aa9ff'; }
+    else if (code === 16) { txt = 'An arena champion arrived (pool ' + (e[4] + 1) + ', generation ' + fmtc(e[3]) + ')'; col = '#ffd36b'; }
     else if (code === 13) { txt = 'Killed by toxins (vent or poison algae)'; col = '#b45cf0'; }
     else if (code === 8 && e[5] >= 3) { txt = 'Died of old age, leaving ' + e[5] + ' children'; col = '#8f8f8f'; }
     else if (code === 7 && e[4] === 1 && Math.random() < 0.15) { txt = 'Born of two parents, ' + e[5] + ' neurons'; col = '#ff78be'; }

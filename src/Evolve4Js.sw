@@ -476,6 +476,7 @@ fun part2() {
     "    else if (code === 6) { txt = 'A creature was eaten by another one (generation ' + fmtc(e[3]) + ')'; col = '#ff5a5a'; }\n" ++
     "    else if (code === 14) { txt = 'A creature swam off to ' + islName(e[4]); col = '#5aa9ff'; }\n" ++
     "    else if (code === 15) { txt = 'A migrant arrived from ' + islName(e[4]); col = '#5aa9ff'; }\n" ++
+    "    else if (code === 16) { txt = 'An arena champion arrived (pool ' + (e[4] + 1) + ', generation ' + fmtc(e[3]) + ')'; col = '#ffd36b'; }\n" ++
     "    else if (code === 13) { txt = 'Killed by toxins (vent or poison algae)'; col = '#b45cf0'; }\n" ++
     "    else if (code === 8 && e[5] >= 3) { txt = 'Died of old age, leaving ' + e[5] + ' children'; col = '#8f8f8f'; }\n" ++
     "    else if (code === 7 && e[4] === 1 && Math.random() < 0.15) { txt = 'Born of two parents, ' + e[5] + ' neurons'; col = '#ff78be'; }\n" ++
@@ -614,11 +615,11 @@ fun part2() {
     "    if (v) v.innerHTML = '<div>energy<b>' + c[8] + '%</b></div><div>health<b>' + c[9] + '%</b></div><div>age<b>' + Math.round(c[23] / 33) + 's</b></div><div>children / kills<b>' + c[24] + ' / ' + c[25] + '</b></div>';\n" ++
     "    var tr = $('i-traits');\n" ++
     "    var bc = c[35] || [0, 0, 0, 0, 0];\n" ++
-    "    if (tr) tr.innerHTML = '<p class=\"cap\" style=\"margin:0 0 8px\"><b>Body:</b> ' + (c[32] || 1) + ' nodes &middot; ' + bc[2] + ' fins, ' + bc[0] + ' spikes, ' + bc[1] + ' armor, ' + bc[3] + ' mouths &middot; ' + bc[4] + ' muscles &middot; mass ' + ((c[31] || 0) / 100).toFixed(1) + '</p>' +\n" ++
     ""
 }
 
 fun part3() {
+    "    if (tr) tr.innerHTML = '<p class=\"cap\" style=\"margin:0 0 8px\"><b>Body:</b> ' + (c[32] || 1) + ' nodes &middot; ' + bc[2] + ' fins, ' + bc[0] + ' spikes, ' + bc[1] + ' armor, ' + bc[3] + ' mouths &middot; ' + bc[4] + ' muscles &middot; mass ' + ((c[31] || 0) / 100).toFixed(1) + '</p>' +\n" ++
     "      trait('scale', c[10], 30, 200, '#ffdc78', (c[10] / 100).toFixed(2)) + trait('rhythm', c[11], 30, 250, '#5ac8ff', (c[11] / 100).toFixed(2)) +\n" ++
     "      trait('muscle', c[12], 0, 200, '#9aa8bc', (c[12] / 100).toFixed(2)) + trait('spike power', c[34] || 0, 0, 200, '#ff5a5a', String(c[34] || 0)) +\n" ++
     "      trait('sight', c[33] || c[14], 5, 80, '#50e3c2', ((c[33] || c[14]) / 100).toFixed(2)) + trait('diet', c[15], 0, 100, '#ff9a50', c[15] < 35 ? 'plants' : c[15] > 65 ? 'meat' : 'both') +\n" ++
@@ -818,11 +819,11 @@ fun part3() {
     "        }\n" ++
     "      }\n" ++
     "    }\n" ++
-    "    return R;\n" ++
     ""
 }
 
 fun part4() {
+    "    return R;\n" ++
     "  }\n" ++
     "\n" ++
     "  function SX(u) { return view.ox + u * view.s; }\n" ++
