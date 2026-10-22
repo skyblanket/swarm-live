@@ -515,8 +515,13 @@ fun rand_type() {
     if (r < 0.28) { 0 } else { if (r < 0.42) { 3 } else { if (r < 0.54) { 1 } else { if (r < 0.65) { 2 } else { if (r < 0.79) { 4 } else { if (r < 0.88) { 5 } else { if (r < 0.94) { 7 } else { 8 } } } } } } }
 }
 
+# genes [id, parent, angle, length, radius, type, muscle, phase, repeat, mirror]: repeat N grows the gene's
+# whole subtree N more times down a chain (a segmented body), mirror 1 also grows it on the other side
+fun m_rep(gn) { if (length(gn) > 8) { nth(gn, 8) } else { 0 } }
+fun m_sym(gn) { if (length(gn) > 9) { nth(gn, 9) } else { 0 } }
 fun new_mgene(parent, k) {
-    [1000 + rndi(9000000), parent, (rndf() - 0.5) * 6.2832, 0.022 + rndf() * 0.02, 0.006 + rndf() * 0.008, rand_type(), if (rndf() < 0.5) { 1 } else { 0 }, rndf() * 6.2832]
+    [1000 + rndi(9000000), parent, (rndf() - 0.5) * 6.2832, 0.022 + rndf() * 0.02, 0.006 + rndf() * 0.008, rand_type(), if (rndf() < 0.5) { 1 } else { 0 }, rndf() * 6.2832,
+     if (rndf() < 0.08) { 1 + rndi(3) } else { 0 }, if (rndf() < 0.15) { 1 } else { 0 }]
 }
 
 fun rand_morph(k, acc) {
@@ -534,8 +539,11 @@ fun mut_mgene(gn, r) {
     ty = if (rndf() < 0.02 * r) { rand_type() } else { nth(gn, 5) }
     mu = if (rndf() < 0.03 * r) { 1 - nth(gn, 6) } else { nth(gn, 6) }
     ph = if (rndf() < 0.08 * r) { nth(gn, 7) + gauss() * 0.7 } else { nth(gn, 7) }
-    [hd(gn), nth(gn, 1), ang, len, rad, ty, mu, ph]
+    rp = if (rndf() < 0.03 * r) { clampi(m_rep(gn) + (if (rndf() < 0.5) { 1 } else { 0 - 1 }), 0, 6) } else { m_rep(gn) }
+    sy = if (rndf() < 0.015 * r) { 1 - m_sym(gn) } else { m_sym(gn) }
+    [hd(gn), nth(gn, 1), ang, len, rad, ty, mu, ph, rp, sy]
 }
+fun clampi(v, a, b) { if (v < a) { a } else { if (v > b) { b } else { v } } }
 fun mut_mgenes(lst, r, acc) { if (length(lst) == 0) { rev(acc, []) } else { mut_mgenes(tl(lst), r, [mut_mgene(hd(lst), r) | acc]) } }
 
 fun is_parent(lst, id) { if (length(lst) == 0) { false } else { if (nth(hd(lst), 1) == id) { true } else { is_parent(tl(lst), id) } } }
@@ -563,7 +571,7 @@ fun expr_m_union(as, bs, acc) {
     else {
         x = hd(as)
         y = find_n(bs, hd(x))
-        e = if (y == nil) { x } else { [hd(x), nth(x, 1), (nth(x, 2) + nth(y, 2)) / 2.0, (nth(x, 3) + nth(y, 3)) / 2.0, (nth(x, 4) + nth(y, 4)) / 2.0, nth(x, 5), nth(x, 6), (nth(x, 7) + nth(y, 7)) / 2.0] }
+        e = if (y == nil) { x } else { [hd(x), nth(x, 1), (nth(x, 2) + nth(y, 2)) / 2.0, (nth(x, 3) + nth(y, 3)) / 2.0, (nth(x, 4) + nth(y, 4)) / 2.0, nth(x, 5), nth(x, 6), (nth(x, 7) + nth(y, 7)) / 2.0, m_rep(x), m_sym(x)] }
         expr_m_union(tl(as), remove_n(bs, hd(x)), [e | acc])
     }
 }
@@ -592,19 +600,33 @@ fun ids_of_m(lst, acc) { if (length(lst) == 0) { acc } else { ids_of_m(tl(lst), 
 fun core_r(ph) { 0.010 * fmax(0.3, hd(ph)) }
 fun build_spec(ph, genes) {
     sc = fmax(0.3, hd(ph))
-    rev(bs_acc(genes, genes, [{core_r(ph), 6, 0 - 1, 0.0, 0, 0.0, 0.0, 0.0}], [0], sc), [])
+    rev(grow(genes, 0, 0, 0.0, 1.0, 0.0, [{core_r(ph), 6, 0 - 1, 0.0, 0, 0.0, 0.0, 0.0}], sc), [])
 }
-# acc is the spec list built so far (reversed); ids holds the gene id of each index (reversed)
-fun bs_acc(all, lst, acc, ids, sc) {
-    if (length(lst) == 0) { acc }
+# acc holds the nodes grown so far, newest first; a node's index is its position from the oldest (the core is 0).
+# grow the children of gene pid on node pidx (absolute angle pang); sg = -1 mirrors angles; dph shifts muscle timing
+fun grow(genes, pid, pidx, pang, sg, dph, acc, sc) { grow_kids(genes, kids_of(genes, pid, []), pidx, pang, sg, dph, acc, sc) }
+fun kids_of(genes, pid, acc) { if (length(genes) == 0) { rev(acc, []) } else { gn = hd(genes)  kids_of(tl(genes), pid, if (nth(gn, 1) == pid) { [gn | acc] } else { acc }) } }
+fun grow_kids(genes, kids, pidx, pang, sg, dph, acc, sc) {
+    if (length(kids) == 0 || length(acc) >= max_nodes) { acc }
     else {
-        gn = hd(lst)
-        n = length(acc)
-        pidx = idx_rev(ids, nth(gn, 1), n - 1)
-        pang = if (pidx <= 0) { 0.0 } else { elem(nth(rev(acc, []), pidx), 7) }
-        a0 = pang + nth(gn, 2)
+        gn = hd(kids)
+        a1 = grow_chain(genes, gn, pidx, pang, sg, dph, 0, acc, sc)
+        a2 = if (m_sym(gn) == 1) { grow_chain(genes, gn, pidx, pang, 0.0 - sg, dph, 0, a1, sc) } else { a1 }
+        grow_kids(genes, tl(kids), pidx, pang, sg, dph, a2, sc)
+    }
+}
+# copy k of a gene and its subtree: copy 0 sits at the gene's angle; each further copy continues straight on
+# from the one before, its muscles a beat later (phase - 0.9 per segment), so a wave runs from head to tail
+fun grow_chain(genes, gn, pidx, pang, sg, dph, k, acc, sc) {
+    if (k > m_rep(gn) || length(acc) >= max_nodes) { acc }
+    else {
+        a0 = if (k == 0) { pang + sg * nth(gn, 2) } else { pang }
         side = if (Math.sin(a0) > 0.05) { 1.0 } else { if (Math.sin(a0) < 0.0 - 0.05) { 0.0 - 1.0 } else { 0.0 } }
-        bs_acc(all, tl(lst), [{nth(gn, 4) * sc, nth(gn, 5), if (pidx < 0) { 0 } else { pidx }, nth(gn, 3) * sc, nth(gn, 6), nth(gn, 7), side, a0} | acc], [hd(gn) | ids], sc)
+        d2 = dph - 0.9 * to_float(k)
+        me = length(acc)
+        a1 = [{nth(gn, 4) * sc, nth(gn, 5), pidx, nth(gn, 3) * sc, nth(gn, 6), nth(gn, 7) + d2, side, a0} | acc]
+        a2 = grow(genes, hd(gn), me, a0, sg, d2, a1, sc)
+        grow_chain(genes, gn, me, a0, sg, dph, k + 1, a2, sc)
     }
 }
 # index of gene id in the reversed id list (k is the index of the head)
@@ -652,9 +674,10 @@ fun physics(spec, nodes, hx, hy, om, ph, thrust, turn, tick, slowk, obs, mass) {
     freq = fmax(0.1, nth(ph, 1))
     w = 0.35 * freq
     stren = fmax(0.0, nth(ph, 2))
-    # cilia: a small push along the body axis and a small turning torque, weaker for heavy bodies
+    # cilia: a small push along the body axis and a small turning torque, weaker for heavy bodies.
+    # Kept weak (0.0002) so that real swimming (fins, and waves down segmented bodies) is what makes a body fast
     cil = 1.0 / (1.0 + 0.08 * fmax(1.0, mass))
-    nodes0 = push_core(nodes, hx * 0.0007 * thrust * cil / slowk, hy * 0.0007 * thrust * cil / slowk)
+    nodes0 = push_core(nodes, hx * 0.0002 * thrust * cil / slowk, hy * 0.0002 * thrust * cil / slowk)
     phys_sub(spec, nodes0, hx, hy, om + 0.015 * turn * cil, w, freq, stren, thrust, turn, tick, slowk, obs, 2, 0.0)
 }
 fun phys_sub(spec, nodes, hx, hy, om, w, freq, stren, thrust, turn, tick, slowk, obs, k, work) {
@@ -723,7 +746,8 @@ fun integrate(spec, nodes, fs, slowk, obs, hx, hy, i, acc) {
         vx0 = elem(nd, 2) + elem(f, 0) / m
         vy0 = elem(nd, 3) + elem(f, 1) / m
         # drag: fins drag hard across their link and lightly along it; everything else evenly
-        v = if (elem(sp, 1) == 3 && i > 0) { fin_drag(vx0, vy0, nd, nth(rev(acc, []), elem(sp, 2)), slowk, hx, hy) } else { {vx0 * (1.0 - 0.04 * slowk), vy0 * (1.0 - 0.04 * slowk)} }
+        v = if (elem(sp, 1) == 3 && i > 0) { fin_drag(vx0, vy0, nd, nth(rev(acc, []), elem(sp, 2)), slowk, hx, hy) }
+            else { if (elem(sp, 1) == 0 && i > 0) { seg_drag(vx0, vy0, nd, nth(rev(acc, []), elem(sp, 2)), slowk) } else { {vx0 * (1.0 - 0.04 * slowk), vy0 * (1.0 - 0.04 * slowk)} } }
         x = elem(nd, 0) + elem(v, 0)
         y = elem(nd, 1) + elem(v, 1)
         po = push_out(clampw(x), clampw(y), obs)
@@ -744,6 +768,22 @@ fun fin_drag(vx, vy, nd, pn, slowk, hx, hy) {
     back = (px * hx + py * hy) < 0.0
     kp = fmin(0.95, (if (back) { 0.7 } else { 0.08 }) * slowk)
     ka = fmin(0.95, 0.05 * slowk)
+    {vpar * (1.0 - ka) * ux + px * (1.0 - kp), vpar * (1.0 - ka) * uy + py * (1.0 - kp)}
+}
+
+# a body segment is slender: water resists it sideways (0.10) far more than along its length (0.02), so a
+# wave travelling down a chain of segments pushes the body forward, the way an eel or a worm swims
+fun seg_drag(vx, vy, nd, pn, slowk) {
+    lx = elem(nd, 0) - elem(pn, 0)
+    ly = elem(nd, 1) - elem(pn, 1)
+    l = Math.sqrt(lx * lx + ly * ly) + 0.000001
+    ux = lx / l
+    uy = ly / l
+    vpar = vx * ux + vy * uy
+    px = vx - vpar * ux
+    py = vy - vpar * uy
+    kp = fmin(0.95, 0.10 * slowk)
+    ka = fmin(0.95, 0.02 * slowk)
     {vpar * (1.0 - ka) * ux + px * (1.0 - kp), vpar * (1.0 - ka) * uy + py * (1.0 - kp)}
 }
 
@@ -1986,7 +2026,7 @@ fun fix_body(lst) { if (length(lst) == 0) { [] } else { [[to_float(hd(hd(lst))),
 fun fix_ns(lst) { if (length(lst) == 0) { [] } else { n = hd(lst)  [[to_int(hd(n)), to_int(nth(n, 1)), to_float(nth(n, 2)), to_float(nth(n, 3))] | fix_ns(tl(lst))] } }
 fun fix_cs(lst) { if (length(lst) == 0) { [] } else { c = hd(lst)  [[to_int(hd(c)), to_int(nth(c, 1)), to_float(nth(c, 2))] | fix_cs(tl(lst))] } }
 fun cap(l, k) { if (length(l) > k) { Std.take(l, k) } else { l } }
-fun fix_m(l, acc) { if (l == nil || length(l) == 0) { rev(acc, []) } else { x = hd(l)  fix_m(tl(l), [[to_int(hd(x)), to_int(nth(x, 1)), to_float(nth(x, 2)), to_float(nth(x, 3)), to_float(nth(x, 4)), to_int(nth(x, 5)), to_int(nth(x, 6)), to_float(nth(x, 7))] | acc]) } }
+fun fix_m(l, acc) { if (l == nil || length(l) == 0) { rev(acc, []) } else { x = hd(l)  fix_m(tl(l), [[to_int(hd(x)), to_int(nth(x, 1)), to_float(nth(x, 2)), to_float(nth(x, 3)), to_float(nth(x, 4)), to_int(nth(x, 5)), to_int(nth(x, 6)), to_float(nth(x, 7)), to_int(m_rep(x)), to_int(m_sym(x))] | acc]) } }
 fun fix_hap(h) { %{b: fix_body(g(h, 'b')), n: cap(fix_ns(g(h, 'n')), nmax), c: cap(fix_cs(g(h, 'c')), cmax), m: fix_m(g(h, 'm'), [])} }
 fun fix_sps(lst) { if (length(lst) == 0) { [] } else { r = hd(lst)  [[to_int(hd(r)), fl(nth(r, 1)), to_int(nth(r, 2)), to_int(nth(r, 3))] | fix_sps(tl(lst))] } }
 fun fix_hof(lst) {
@@ -3023,7 +3063,32 @@ fun watch(tab, isl, w) {
 
 fun start_islands(tab, k) { if (k >= nisl(tab)) { 'ok' } else { spawn(watchdog(tab, k))  start_islands(tab, k + 1) } }
 
-fun main() { if (getenv("EVOLVE_MODE") == "arena") { arena_main() } else { world_main() } }
+fun main() { m = getenv("EVOLVE_MODE")  if (m == "arena") { arena_main() } else { if (m == "bodytest") { body_test() } else { world_main() } } }
+
+# EVOLVE_MODE=bodytest: grow hand-made bodies and swim each at full thrust for 600 ticks (a check of the body physics)
+fun mid_ph(k) { if (k >= n_loci) { [] } else { [(lo(k) + hi(k)) / 2.0 | mid_ph(k + 1)] } }
+fun sim_body(spec, nodes, hx, hy, om, ph, mass, t, n, thrust) {
+    if (t >= n) { nodes }
+    else { r = physics(spec, nodes, hx, hy, om, ph, thrust, 0.0, t, 1.0, [], mass)  sim_body(spec, elem(r, 0), elem(r, 1), elem(r, 2), elem(r, 4), ph, mass, t + 1, n, thrust) }
+}
+fun bt_case(name, genes) {
+    ph = mid_ph(0)
+    spec = build_spec(ph, genes)
+    nodes = layout(spec, 0.8, 0.8, 1.0, 0.0)
+    e1 = sim_body(spec, nodes, 1.0, 0.0, 0.0, ph, elem(body_stats(spec), 0), 0, 150, 1.0)
+    dx = elem(hd(e1), 0) - 0.8
+    dy = elem(hd(e1), 1) - 0.8
+    print(name ++ ": " ++ to_string(length(spec)) ++ " nodes, swam " ++ to_string(r3(Math.sqrt(dx * dx + dy * dy))) ++ " thousandths (dx " ++ to_string(r3(dx)) ++ ", dy " ++ to_string(r3(dy)) ++ ")")
+}
+fun body_test() {
+    bt_case("eel, spine of 7 with muscles", [[1001, 0, 3.1416, 0.025, 0.008, 0, 1, 0.0, 6, 0]])
+    bt_case("same spine, no muscles      ", [[1001, 0, 3.1416, 0.025, 0.008, 0, 0, 0.0, 6, 0]])
+    bt_case("spine pointing forward      ", [[1001, 0, 0.0, 0.025, 0.008, 0, 1, 0.0, 6, 0]])
+    bt_case("centipede: spine + leg pairs", [[1001, 0, 3.1416, 0.025, 0.008, 0, 1, 0.0, 5, 0], [1002, 1001, 1.57, 0.02, 0.006, 3, 1, 0.0, 0, 1]])
+    bt_case("one mirrored fin pair       ", [[1001, 0, 1.9, 0.03, 0.009, 3, 1, 0.0, 0, 1]])
+    bt_case("old-style fin star (8 genes)", [[1001, 0, 1.2, 0.03, 0.008, 3, 1, 0.0], [1002, 0, 0.0 - 1.2, 0.03, 0.008, 3, 1, 1.0], [1003, 0, 2.2, 0.03, 0.008, 4, 1, 2.0], [1004, 0, 0.0 - 2.2, 0.03, 0.008, 1, 0, 0.0]])
+    sys_exit(0)
+}
 
 fun world_main() {
     tab = make_tables(ets_new(), 16)
