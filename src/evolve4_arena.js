@@ -15,8 +15,8 @@
   var dpr = Math.min(2, window.devicePixelRatio || 1);
   var WS = 1.6;
   var TASKS = [
-    { name: 'Swim to the light', sub: 'reach each glowing pellet; it is sensed exactly like food', unit: 'pellets' },
-    { name: 'Chase', sub: 'catch the prey; it runs faster after every catch', unit: 'caught' },
+    { name: 'Swim to the light', sub: 'each pellet appears far away and drifts; it is sensed exactly like food', unit: 'pellets' },
+    { name: 'Hunt', sub: 'the prey is evolved too, by its own population, scored on escaping', unit: 'caught' },
     { name: 'Fight', sub: 'a duel with its pool’s runner-up: spikes wound, armor protects (3× health)', unit: 'score' }
   ];
   var st = [null, null, null], trails = [[], [], []], cams = [null, null, null], preyPrev = null;
@@ -35,8 +35,8 @@
     h += '</div><div class="row2"><div class="card"><h3>Now competing <span id="c-sub">waiting for the first generation</span></h3><div class="champ"><canvas id="c-cv" width="240" height="240"></canvas><div style="flex:1;min-width:0"><div id="c-title" style="font-size:18px;font-weight:600">&ndash;</div><div id="c-st" style="font-size:12px;color:var(--mu);margin-top:2px"></div><div class="kv" id="c-kv"></div></div></div></div>' +
       '<div class="card"><h3>Pools <span>each evolves on its own; every 8 generations its champion moves to the next pool</span></h3><table class="pt" id="pt"></table></div></div>' +
       '<div class="card" style="padding:14px 16px"><h3>Progress <span>best score per generation, one line per pool</span></h3><div class="charts">' +
-      '<div><div class="k">Light: pellets reached</div><canvas id="ch0"></canvas></div><div><div class="k">Chase: prey caught</div><canvas id="ch1"></canvas></div><div><div class="k">Fight: damage dealt &minus; half taken</div><canvas id="ch2"></canvas></div></div>' +
-      '<p class="cap">In the open world most creatures could get by drifting through algae, so nothing pushed them to move well. Here every genome is <b>tested</b>: each generation it swims for the light, chases the prey, and fights two other genomes. Every trial is its own swarmrt process, so a generation runs thousands of trials at once. A genome’s fitness is its average rank over the three tasks. The best 6 survive unchanged; the rest of the pool is bred from tournament winners (two parents, meiosis, mutation), so bodies and brains change together. Bodies, physics, senses and the brain (with its evolved learning rule) are exactly those of Evolution 4, and the pools started from its evolved creatures. Every 15 seconds the pools’ champions are written to a file; each Evolution 4 island takes one in every 3000 ticks, so they compete in the open world too.</p></div>';
+      '<div><div class="k">Light: pellets reached</div><canvas id="ch0"></canvas></div><div><div class="k">Hunt: prey caught</div><canvas id="ch1"></canvas></div><div><div class="k">Fight: damage dealt &minus; half taken</div><canvas id="ch2"></canvas></div></div>' +
+      '<p class="cap">In the open world most creatures could get by drifting through algae, so nothing pushed them to move well. Here every genome is <b>tested</b>: each generation it swims for far, drifting pellets, hunts a prey, and fights two other genomes. Reaching the light and the hunt are divided by a size cost, and a pellet only counts when a mouth touches it, so a body that spins in place and sweeps its limbs scores nothing. The prey are not scripted: every pool also evolves 80 prey genomes, scored on how far they stay from the hunters, so hunters and prey drive each other (an arms race). Every trial is its own swarmrt process, so a generation runs thousands of trials at once. A genome’s fitness is its average rank over the three tasks. The best 6 survive unchanged; the rest of the pool is bred from tournament winners (two parents, meiosis, mutation), so bodies and brains change together. Bodies, physics, senses and the brain (with its evolved learning rule) are exactly those of Evolution 4, and the pools started from its evolved creatures. Every 15 seconds the pools’ champions are written to a file; each Evolution 4 island takes one in every 3000 ticks, so they compete in the open world too.</p></div>';
     m.innerHTML = h;
   }
 
@@ -46,6 +46,12 @@
   window.SwEvents.live = function (d) {
     var t = d.task, prev = st[t], i;
     if (!prev || d.tick < prev.tick) { trails[t] = []; cams[t] = null; parts[t] = []; texts[t] = []; rings[t] = []; prev = null; if (t === 1) preyPrev = null; }
+    if (prev && t === 1 && d.n > prev.n && prev.b.length > 1) {
+      var pc = prev.b[1][1];
+      burst(t, pc[3] / 1000, pc[4] / 1000, 26, [125, 255, 176], 0.0035);
+      rings[t].push({ x: pc[3] / 1000, y: pc[4] / 1000, age: 0, col: [125, 255, 176] });
+      texts[t].push({ x: pc[3] / 1000, y: pc[4] / 1000, age: 0, txt: 'caught!', col: '#7dffb0' });
+    }
     if (prev && d.n > prev.n && prev.tg) {
       var cx = prev.tg[0] / 1000, cy = prev.tg[1] / 1000, col = t === 0 ? [255, 214, 110] : [125, 255, 176];
       burst(t, cx, cy, 26, col, 0.0035);
@@ -328,7 +334,7 @@
         var B = d.b[bi], bd = B[1], P = [];
         for (i = 0; i < bd.length / 5; i++) P.push([SX(bd[i * 5 + 3] / 1000), SY(bd[i * 5 + 4] / 1000)]);
         var lk = look;
-        if (t === 2 && d.b.length > 1) { var o = d.b[1 - bi][1]; lk = [SX(o[3] / 1000), SY(o[4] / 1000)]; }
+        if (t >= 1 && d.b.length > 1) { var o = d.b[1 - bi][1]; lk = [SX(o[3] / 1000), SY(o[4] / 1000)]; }
         drawCreature(g, bd, B[0], P, s, lk, now, B[6] / 100);
       }
       /* particles: bubbles rise and fade, bursts fly out */
@@ -385,6 +391,12 @@
       G.fillStyle = 'rgba(0,0,0,0.7)'; G.fillRect(fx - 26, fy - 1, 52, 8);
       for (var sg = 0; sg < 10; sg++) { G.fillStyle = sg < Math.ceil(hp * 10) ? (hp > 0.5 ? '#50e3c2' : hp > 0.25 ? '#f5a623' : '#ff5a5a') : '#2a2a2a'; G.fillRect(fx - 25 + sg * 5, fy, 4, 6); }
       G.font = '700 11px ui-sans-serif,-apple-system,sans-serif'; G.fillStyle = bi === 0 ? '#ffd36b' : '#c9c9c9'; G.fillText(bi === 0 ? 'CHAMPION' : 'RUNNER-UP', fx, fy - 6);
+    }
+    if (t === 1) for (bi = 0; bi < d.b.length; bi++) {
+      var cbh = d.b[bi][1], lx2 = SX(cbh[3] / 1000) * PX, ly2 = SY(cbh[4] / 1000) * PX - 30;
+      G.font = '700 11px ui-sans-serif,-apple-system,sans-serif'; G.textAlign = 'center';
+      G.fillStyle = 'rgba(0,0,0,0.7)'; G.fillText(bi === 0 ? 'HUNTER' : 'PREY', lx2 + 1, ly2 + 1);
+      G.fillStyle = bi === 0 ? '#ffd36b' : '#7dffb0'; G.fillText(bi === 0 ? 'HUNTER' : 'PREY', lx2, ly2);
     }
     if (t === 2 && d.b.length > 1 && (d.b[0][2] <= 0 || d.b[1][2] <= 0)) {
       G.font = '800 44px ui-sans-serif,-apple-system,sans-serif'; G.textAlign = 'center';

@@ -2548,86 +2548,86 @@ fun live_bodies(crs) {
     else { c = hd(crs)  [[Math.round(nth(g(c, 'ph'), 6)), body_flat(g(c, 'spec'), g(c, 'nodes'), []), Math.round(fmax(0.0, g(c, 'h')) * 100.0 / g(c, 'hmax')), g(c, 'pain'), r2(nth(g(c, 'outs'), 1)), r2(hd(g(c, 'outs'))), r2(nth(g(c, 'outs'), 2))] | live_bodies(tl(crs))] }
 }
 fun live_frame(task, tick, crs, tg, score, n) {
-    LiveView.broadcast("arena", {'frame', json_encode(%{t: "ev", n: "live", d: %{task: task, tick: tick, T: if (task == 2) { 500 } else { ar_T() }, b: live_bodies(crs), tg: tg, sc: r2(score), n: n}})})
+    LiveView.broadcast("arena", {'frame', json_encode(%{t: "ev", n: "live", d: %{task: task, tick: tick, T: if (task == 2) { 500 } else { if (task == 0) { light_T() } else { chase_T() } }, b: live_bodies(crs), tg: tg, sc: r2(score), n: n}})})
     sleep(25)
 }
 
-# ---- task 1: swim to the light ----
-fun light_target(seed, k, x, y) {
-    a = hr(seed, k * 2) * 6.2832
-    d = 0.12 + hr(seed, k * 2 + 1) * 0.16
-    {clampf(x + Math.cos(a) * d, 0.15, WS - 0.15), clampf(y + Math.sin(a) * d, 0.15, WS - 0.15)}
+# ---- task 1: swim to the light. A pellet appears 0.45-0.85 away and drifts slowly, so only steady,
+# steered swimming reaches it (a body that spins in place and sweeps its limbs gets nothing) ----
+# score: pellets plus the fraction of the way to the current one, divided by a size cost (1 + 0.01 x mass)
+fun size_cost(c) { 1.0 + 0.01 * g(c, 'mass') }
+fun light_target(seed, k, x, y) { lt_try(seed, k, x, y, 0) }
+fun lt_try(seed, k, x, y, t) {
+    a = hr(seed, k * 13 + t * 2) * 6.2832
+    d = 0.45 + hr(seed, k * 13 + t * 2 + 1) * 0.4
+    tx = x + Math.cos(a) * d
+    ty = y + Math.sin(a) * d
+    if ((tx > 0.15 && tx < WS - 0.15 && ty > 0.15 && ty < WS - 0.15) || t >= 8) { {clampf(tx, 0.15, WS - 0.15), clampf(ty, 0.15, WS - 0.15), Math.cos(a + 1.6) * 0.0004, Math.sin(a + 1.6) * 0.0004} }
+    else { lt_try(seed, k, x, y, t + 1) }
 }
+fun drift(f) {
+    x = elem(f, 0) + elem(f, 2)
+    y = elem(f, 1) + elem(f, 3)
+    {clampf(x, 0.15, WS - 0.15), clampf(y, 0.15, WS - 0.15), if (x < 0.15 || x > WS - 0.15) { 0.0 - elem(f, 2) } else { elem(f, 2) }, if (y < 0.15 || y > WS - 0.15) { 0.0 - elem(f, 3) } else { elem(f, 3) }}
+}
+fun light_T() { 800 }
 fun t_light(ha, hb, seed, plast, live) {
     c = tr_new(ha, hb, 1, 0.8, 0.8, 1.0, 0.0)
     f = light_target(seed, 0, 0.8, 0.8)
-    lt_loop(c, f, dist_to(c, elem(f, 0), elem(f, 1)), 0, 0, seed, plast, live)
+    lt_loop(c, f, dist_to(c, elem(f, 0), elem(f, 1)), 0, 0, seed, plast, live) / size_cost(c)
 }
 fun lt_loop(c, f, d0, got, tick, seed, plast, live) {
     fx = elem(f, 0)
     fy = elem(f, 1)
     d = dist_to(c, fx, fy)
     sc = to_float(got) + fmax(0.0, 1.0 - d / d0)
-    if (tick >= ar_T()) { sc }
+    if (tick >= light_T()) { sc }
     else {
         if (live > 0) { live_frame(0, tick, [c], r3l(fx, fy), sc, got) } else { 'x' }
         c1 = tr_move(c, tr_sens(c, near_item(c, fx, fy), nil, 0.0, 0.0), tick, plast)
         hit = touches(mouths(c1), fx, fy)
         c2 = p(p(c1, 'ate', if (hit) { 25 } else { g(c1, 'ate') - 1 }), 'e', fmin(100.0, g(c1, 'e') - 0.02 + (if (hit) { 15.0 } else { 0.0 })))
-        f2 = if (hit) { light_target(seed, got + 1, g(c2, 'x'), g(c2, 'y')) } else { f }
+        f2 = if (hit) { light_target(seed, got + 1, g(c2, 'x'), g(c2, 'y')) } else { drift(f) }
         d02 = if (hit) { dist_to(c2, elem(f2, 0), elem(f2, 1)) } else { d0 }
         lt_loop(c2, f2, d02, if (hit) { got + 1 } else { got }, tick + 1, seed, plast, live)
     }
 }
 
-# ---- task 2: chase. The prey {x, y, hx, hy} wanders, flees when the hunter comes close, and is faster after each catch ----
-fun prey_speed(caught) { 0.0005 + 0.0002 * to_float(caught) }
-fun prey_step(pr, c, caught, seed, tick) {
-    dx = elem(pr, 0) - g(c, 'x')
-    dy = elem(pr, 1) - g(c, 'y')
-    d = Math.sqrt(dx * dx + dy * dy) + 0.000001
-    wh = rotate_h(elem(pr, 2), elem(pr, 3), (hr(seed, 1000 + tick / 20) - 0.5) * 0.08)
-    flee = d < 0.22
-    hx0 = if (flee) { elem(wh, 0) * 0.4 + dx / d } else { elem(wh, 0) }
-    hy0 = if (flee) { elem(wh, 1) * 0.4 + dy / d } else { elem(wh, 1) }
-    hl = Math.sqrt(hx0 * hx0 + hy0 * hy0) + 0.000001
-    sp = prey_speed(caught) * (if (flee) { 1.0 } else { 0.4 })
-    nx = elem(pr, 0) + hx0 / hl * sp
-    ny = elem(pr, 1) + hy0 / hl * sp
-    out = nx < 0.3 || nx > 1.3 || ny < 0.3 || ny > 1.3
-    bx = 0.8 - nx
-    by = 0.8 - ny
-    bl = Math.sqrt(bx * bx + by * by) + 0.000001
-    {clampf(nx, 0.3, 1.3), clampf(ny, 0.3, 1.3), if (out) { bx / bl } else { hx0 / hl }, if (out) { by / bl } else { hy0 / hl }}
-}
+# ---- task 2: chase. The prey is an evolved creature too, from the pool's own prey population, scored on
+# staying away. It starts 0.35 away; when a hunter's body touches its core it is caught and reappears 0.35 away.
+# hunter: catches + closeness, divided by its size cost; prey: distance kept - half a point per catch ----
 fun touch_any(nodes, spec, x, y) {
     if (length(nodes) == 0) { false }
     else {
         n = hd(nodes)
-        r = elem(hd(spec), 0) + 0.008
+        r = elem(hd(spec), 0) + 0.012
         dx = elem(n, 0) - x
         dy = elem(n, 1) - y
         if (dx * dx + dy * dy < r * r) { true } else { touch_any(tl(nodes), tl(spec), x, y) }
     }
 }
-fun t_chase(ha, hb, seed, plast, live) {
-    c = tr_new(ha, hb, 1, 0.8, 0.8, 1.0, 0.0)
-    a = hr(seed, 101) * 6.2832
-    ch_loop(c, {0.8 + Math.cos(a) * 0.15, 0.8 + Math.sin(a) * 0.15, Math.cos(a), Math.sin(a)}, 0, 0.0, 0, seed, plast, live)
+fun chase_T() { 700 }
+fun prey_at(ha, hb, seed, k, hx, hy) {
+    a = hr(seed, 2000 + k) * 6.2832
+    tr_new(ha, hb, 2, clampf(hx + Math.cos(a) * 0.35, 0.15, WS - 0.15), clampf(hy + Math.sin(a) * 0.35, 0.15, WS - 0.15), Math.cos(a), Math.sin(a))
 }
-fun ch_loop(c, pr, caught, close, tick, seed, plast, live) {
-    px = elem(pr, 0)
-    py = elem(pr, 1)
-    sc = to_float(caught) + close / to_float(ar_T())
-    if (tick >= ar_T()) { sc }
+fun t_chase(ha, hb, pa, pb, seed, plast, live) {
+    a = hr(seed, 101) * 6.2832
+    c = tr_new(ha, hb, 1, 0.8, 0.8, Math.cos(a), Math.sin(a))
+    r = ch_loop(c, prey_at(pa, pb, seed, 0, 0.8, 0.8), pa, pb, 0, 0.0, 0, seed, plast, live)
+    {elem(r, 0) / size_cost(c), elem(r, 1)}
+}
+fun ch_loop(c, pr, pa, pb, caught, close, tick, seed, plast, live) {
+    sc = to_float(caught) + close / to_float(chase_T())
+    if (tick >= chase_T()) { {sc, (to_float(chase_T()) - close) / to_float(chase_T()) - 0.5 * to_float(caught)} }
     else {
-        if (live > 0) { live_frame(1, tick, [c], r3l(px, py), sc, caught) } else { 'x' }
-        c1 = tr_move(c, tr_sens(c, nil, near_item(c, px, py), 0.0, 0.0 - 0.3), tick, plast)
-        hit = touch_any(g(c1, 'nodes'), g(c1, 'spec'), px, py)
-        a = hr(seed, 2000 + caught) * 6.2832
-        pr1 = if (hit) { {clampf(g(c1, 'x') + Math.cos(a) * 0.2, 0.3, 1.3), clampf(g(c1, 'y') + Math.sin(a) * 0.2, 0.3, 1.3), Math.cos(a), Math.sin(a)} } else { prey_step(pr, c1, caught, seed, tick) }
-        d = dist_to(c1, elem(pr1, 0), elem(pr1, 1))
-        ch_loop(c1, pr1, if (hit) { caught + 1 } else { caught }, close + 1.0 - fmin(d, 0.4) / 0.4, tick + 1, seed, plast, live)
+        if (live > 0) { live_frame(1, tick, [c, pr], nil, sc, caught) } else { 'x' }
+        c1 = tr_move(c, tr_sens(c, nil, near_item(c, g(pr, 'x'), g(pr, 'y')), 0.0, hd(g(pr, 'ph')) - hd(g(c, 'ph'))), tick, plast)
+        pr1 = tr_move(pr, tr_sens(pr, nil, near_item(pr, g(c, 'x'), g(c, 'y')), 1.0, hd(g(c, 'ph')) - hd(g(pr, 'ph'))), tick, plast)
+        hit = touch_any(g(c1, 'nodes'), g(c1, 'spec'), g(pr1, 'x'), g(pr1, 'y'))
+        pr2 = if (hit) { prey_at(pa, pb, seed, caught + 1, g(c1, 'x'), g(c1, 'y')) } else { pr1 }
+        d = dist_to(c1, g(pr2, 'x'), g(pr2, 'y'))
+        ch_loop(c1, pr2, pa, pb, if (hit) { caught + 1 } else { caught }, close + 1.0 - fmin(d, 0.6) / 0.6, tick + 1, seed, plast, live)
     }
 }
 
@@ -2667,10 +2667,10 @@ fun fi_score(a, b, close) {
 }
 
 # ---- trial processes ----
-fun trial_solo(pool, i, ha, hb, seed, plast) {
-    l = t_light(ha, hb, seed, plast, 0)
-    ch = t_chase(ha, hb, seed, plast, 0)
-    send(pool, {'ts', i, l, ch})
+fun trial_solo(pool, i, ha, hb, seed, plast) { send(pool, {'ts', i, t_light(ha, hb, seed, plast, 0)}) }
+fun trial_chase(pool, i, j, a, b, seed, plast) {
+    r = t_chase(elem(a, 0), elem(a, 1), elem(b, 0), elem(b, 1), seed, plast, 0)
+    send(pool, {'tc', i, j, elem(r, 0), elem(r, 1)})
 }
 fun trial_duel(pool, i, j, a, b, plast) {
     r = t_fight(elem(a, 0), elem(a, 1), elem(b, 0), elem(b, 1), plast, 0)
@@ -2682,30 +2682,40 @@ fun mr_of(ha, hb) { nth(expr_body(g(ha, 'b'), g(hb, 'b'), 0), 10) }
 # trials run as jobs, at most ARENA_PAR at a time per pool, so the schedulers keep room for the web server
 fun ar_par() { v = getenv("ARENA_PAR")  if (v == nil || v == "") { 4 } else { to_int(v) } }
 fun solo_jobs(k, n, acc) { if (k >= n) { rev(acc, []) } else { solo_jobs(k + 1, n, [{'s', k, 0} | acc]) } }
+fun chase_jobs(perm, prey, np, acc) { if (length(perm) == 0) { rev(acc, []) } else { chase_jobs(tl(perm), tl(prey), np, [{'c', hd(perm), hd(prey) % np} | acc]) } }
 fun duel_jobs(perm, acc) { if (length(perm) < 2) { rev(acc, []) } else { duel_jobs(tl(tl(perm)), [{'d', hd(perm), hd(tl(perm))} | acc]) } }
 fun shuffle(n) { rkeys(Std.sort_by(rk_acc(0, n, []), fun(t) { elem(t, 0) }), []) }
 fun rk_acc(k, n, acc) { if (k >= n) { acc } else { rk_acc(k + 1, n, [{rndf(), k} | acc]) } }
 fun rkeys(l, acc) { if (length(l) == 0) { rev(acc, []) } else { rkeys(tl(l), [elem(hd(l), 1) | acc]) } }
-# ctx = {pool pid, population, seed, plasticity}
+# ctx = {pool pid, population, seed, plasticity, prey population}
 fun run_job(ctx, job) {
     pop = elem(ctx, 1)
     i = elem(job, 1)
+    j = elem(job, 2)
     if (elem(job, 0) == 's') { e = nth(pop, i)  spawn(trial_solo(elem(ctx, 0), i, elem(e, 0), elem(e, 1), elem(ctx, 2), elem(ctx, 3))) }
-    else { j = elem(job, 2)  spawn(trial_duel(elem(ctx, 0), i, j, nth(pop, i), nth(pop, j), elem(ctx, 3))) }
+    else { if (elem(job, 0) == 'c') { spawn(trial_chase(elem(ctx, 0), i, j, nth(pop, i), nth(elem(ctx, 4), j), elem(ctx, 2), elem(ctx, 3))) }
+    else { spawn(trial_duel(elem(ctx, 0), i, j, nth(pop, i), nth(pop, j), elem(ctx, 3))) } }
 }
 fun start_jobs(ctx, jobs, k) { if (k <= 0 || length(jobs) == 0) { jobs } else { run_job(ctx, hd(jobs))  start_jobs(ctx, tl(jobs), k - 1) } }
-fun collect(ctx, jobs, k, L, C, F, N, imm) {
-    if (k <= 0) { {L, C, F, N, imm} }
+# results: L light, C chase (hunter), F / N fight sum and count, P / PN prey sum and count
+fun collect(ctx, jobs, k, L, C, F, N, P, PN, imm) {
+    if (k <= 0) { {L, C, F, N, imm, P, PN} }
     else {
         receive {
-            {'ts', i, l, c} -> collect(ctx, start_jobs(ctx, jobs, 1), k - 1, map_put(L, i, l), map_put(C, i, c), F, N, imm)
+            {'ts', i, l} -> collect(ctx, start_jobs(ctx, jobs, 1), k - 1, map_put(L, i, l), C, F, N, P, PN, imm)
+            {'tc', i, j, sh, sp} -> collect(ctx, start_jobs(ctx, jobs, 1), k - 1, L, map_put(C, i, sh), F, N, map_put(P, j, numf(map_get(P, j)) + sp), map_put(PN, j, num(map_get(PN, j)) + 1), imm)
             {'tf', i, j, si, sj} -> collect(ctx, start_jobs(ctx, jobs, 1), k - 1, L, C, map_put(map_put(F, i, numf(map_get(F, i)) + si), j, numf(map_get(F, j)) + sj),
-                                            map_put(map_put(N, i, num(map_get(N, i)) + 1), j, num(map_get(N, j)) + 1), imm)
-            {'mig', ha, hb, gen} -> collect(ctx, jobs, k, L, C, F, N, [{ha, hb, gen} | imm])
-            after 180000 { {L, C, F, N, imm} }
+                                            map_put(map_put(N, i, num(map_get(N, i)) + 1), j, num(map_get(N, j)) + 1), P, PN, imm)
+            {'mig', ha, hb, gen} -> collect(ctx, jobs, k, L, C, F, N, P, PN, [{ha, hb, gen} | imm])
+            after 180000 { {L, C, F, N, imm, P, PN} }
         }
     }
 }
+fun prey_rows(k, P, PN, acc) {
+    if (k < 0) { acc }
+    else { nn = num(map_get(PN, k))  prey_rows(k - 1, P, PN, [{if (nn > 0) { numf(map_get(P, k)) / to_float(nn) } else { 0.0 - 9.0 }, k} | acc]) }
+}
+fun prey_n() { 80 }
 fun count_below(lst, v, acc) { if (length(lst) == 0) { acc } else { count_below(tl(lst), v, if (hd(lst) < v) { acc + 1 } else { acc }) } }
 fun ranks(vals, all, n, acc) { if (length(vals) == 0) { rev(acc, []) } else { ranks(tl(vals), all, n, [to_float(count_below(all, hd(vals), 0)) / to_float(n) | acc]) } }
 fun score_lists(k, n, L, C, F, N, ls, cs, fs) {
@@ -2743,15 +2753,20 @@ fun mean_of(l) { if (length(l) == 0) { 0.0 } else { sum_f(l, 0.0) / to_float(len
 fun sum_f(l, a) { if (length(l) == 0) { a } else { sum_f(tl(l), a + hd(l)) } }
 fun max_f(l, m) { if (length(l) == 0) { m } else { max_f(tl(l), fmax(m, hd(l))) } }
 
-fun pool_loop(hub, k, pop, gen, next_id, hist) {
+fun pool_loop(hub, k, pop, prey, gen, next_id, hist) {
     seed = gen * 7919 + k * 104729 + 17
     me = self()
     n = length(pop)
+    np = length(prey)
     t0 = timestamp()
-    jobs = app(duel_jobs(shuffle(n), []), app(duel_jobs(shuffle(n), []), solo_jobs(0, n, [])))
+    jobs = app(duel_jobs(shuffle(n), []), app(duel_jobs(shuffle(n), []), app(chase_jobs(shuffle(n), app(shuffle(np), shuffle(np)), np, []), solo_jobs(0, n, []))))
     nd = length(jobs) - n
-    ctx = {me, pop, seed, 1}
-    r = collect(ctx, start_jobs(ctx, jobs, ar_par()), length(jobs), %{}, %{}, %{}, %{}, [])
+    ctx = {me, pop, seed, 1, prey}
+    r = collect(ctx, start_jobs(ctx, jobs, ar_par()), length(jobs), %{}, %{}, %{}, %{}, %{}, %{}, [])
+    prow = prey_rows(np - 1, elem(r, 5), elem(r, 6), [])
+    psorted = Std.sort_by(prow, fun(t) { 0.0 - elem(t, 0) })
+    pbest = hd(psorted)
+    pbe = nth(prey, elem(pbest, 1))
     sl = score_lists(n - 1, n, elem(r, 0), elem(r, 1), elem(r, 2), elem(r, 3), [], [], [])
     ls = elem(sl, 0)
     cs = elem(sl, 1)
@@ -2761,20 +2776,28 @@ fun pool_loop(hub, k, pop, gen, next_id, hist) {
     best = hd(sorted)
     second = hd(tl(sorted))
     be = nth(pop, elem(best, 1))
-    h2 = cap([[gen, r2(max_f(ls, 0.0)), r2(max_f(cs, 0.0)), r2(max_f(fs, 0.0 - 99.0)), r2(mean_of(ls)), r2(mean_of(cs)), r2(mean_of(fs))] | hist], 300)
-    send(hub, {'gen', k, gen, {elem(be, 0), elem(be, 1), elem(best, 2), elem(best, 3), elem(best, 4), elem(be, 3), elem(be, 2)}, nth(pop, elem(second, 1)), hd(h2), n + nd, timestamp() - t0})
+    pscores = prey_scores(prow, [])
+    h2 = cap([[gen, r2(max_f(ls, 0.0)), r2(max_f(cs, 0.0)), r2(max_f(fs, 0.0 - 99.0)), r2(mean_of(ls)), r2(mean_of(cs)), r2(mean_of(fs)), r2(max_f(pscores, 0.0 - 99.0)), r2(mean_of(pscores))] | hist], 300)
+    send(hub, {'gen', k, gen, {elem(be, 0), elem(be, 1), elem(best, 2), elem(best, 3), elem(best, 4), elem(be, 3), elem(be, 2)}, nth(pop, elem(second, 1)), hd(h2), n + nd, timestamp() - t0,
+               {elem(pbe, 0), elem(pbe, 1), elem(pbest, 0), elem(pbe, 3), elem(pbe, 2)}})
     im = imm_entries(elem(r, 4), next_id, [])
     el = elites(pop, sorted, 6, [])
     kids = breed_kids(k, pop, rows, n - length(el) - length(elem(im, 0)), elem(im, 1), [])
     pop2 = app(el, app(elem(im, 0), elem(kids, 0)))
-    if (gen % 5 == 4) { save_pool(k, pop2, gen + 1, elem(kids, 1), h2) } else { 'x' }
-    pool_loop(hub, k, pop2, gen + 1, elem(kids, 1), h2)
+    pel = elites(prey, psorted, 4, [])
+    pkids = breed_kids(k, prey, prow, np - length(pel), elem(kids, 1), [])
+    prey2 = app(pel, elem(pkids, 0))
+    if (gen % 5 == 4) { save_pool(k, pop2, prey2, gen + 1, elem(pkids, 1), h2) } else { 'x' }
+    pool_loop(hub, k, pop2, prey2, gen + 1, elem(pkids, 1), h2)
 }
+fun prey_scores(rows, acc) { if (length(rows) == 0) { acc } else { prey_scores(tl(rows), [elem(hd(rows), 0) | acc]) } }
 
 fun pool_name(k) { ar_dir() ++ "/pool-" ++ to_string(k) ++ ".json" }
-fun save_pool(k, pop, gen, next_id, hist) {
-    file_atomic_write(pool_name(k), json_encode(%{gen: gen, next_id: next_id, hist: hist, pop: pop_rows(pop)}))
+fun save_pool(k, pop, prey, gen, next_id, hist) {
+    file_atomic_write(pool_name(k), json_encode(%{gen: gen, next_id: next_id, hist: hist, pop: pop_rows(pop), prey: pop_rows(prey)}))
 }
+# a new prey population: the pool's first 20 genomes and 60 of their offspring
+fun seed_prey(pop, id) { fill_pool(Std.take(pop, 20), id, prey_n() - 20) }
 fun pop_rows(pop) { if (length(pop) == 0) { [] } else { e = hd(pop)  [[elem(e, 0), elem(e, 1), elem(e, 2), elem(e, 3)] | pop_rows(tl(pop))] } }
 fun pop_of_rows(l, acc) {
     if (length(l) == 0) { rev(acc, []) }
@@ -2804,8 +2827,13 @@ fun pool_start(hub, k) {
     send(hub, {'hello', k, self()})
     path = pool_name(k)
     d = if (file_exists(path) == 'true') { json_decode(read_text(path)) } else { nil }
-    if (d == nil) { pool_loop(hub, k, seed_pool(k), 0, k * 10000000 + ar_pop(), []) }
-    else { pool_loop(hub, k, pop_of_rows(g(d, 'pop'), []), to_int(g(d, 'gen')), to_int(g(d, 'next_id')), fix_hist(g(d, 'hist'))) }
+    if (d == nil) { pop = seed_pool(k)  pool_loop(hub, k, pop, seed_prey(pop, k * 10000000 + 5000000), 0, k * 10000000 + ar_pop(), []) }
+    else {
+        pop = pop_of_rows(g(d, 'pop'), [])
+        nid = to_int(g(d, 'next_id'))
+        prey = if (g(d, 'prey') == nil) { seed_prey(pop, nid) } else { pop_of_rows(g(d, 'prey'), []) }
+        pool_loop(hub, k, pop, prey, to_int(g(d, 'gen')), nid + 100, fix_hist(g(d, 'hist')))
+    }
 }
 
 # ---- the hub: collects each pool's champion, writes the champions file, migrates champions between pools, feeds the UI ----
@@ -2824,9 +2852,9 @@ fun hist_rows(s, k, n) { if (k >= n) { [] } else { [list_or_empty(map_get(g(s, '
 fun hub_loop(s) {
     receive {
         {'hello', k, pid} -> hub_loop(p(s, 'pids', map_put(g(s, 'pids'), k, pid)))
-        {'gen', k, gen, be, second, hrow, ntr, ms} ->
+        {'gen', k, gen, be, second, hrow, ntr, ms, pbe} ->
             n = g(s, 'n')
-            s1 = p(p(p(p(p(p(p(s, 'best', map_put(g(s, 'best'), k, be)), 'rival', map_put(g(s, 'rival'), k, second)), 'gens', map_put(g(s, 'gens'), k, gen + 1)),
+            s1 = p(p(p(p(p(p(p(p(s, 'preyb', map_put(g(s, 'preyb'), k, pbe)), 'best', map_put(g(s, 'best'), k, be)), 'rival', map_put(g(s, 'rival'), k, second)), 'gens', map_put(g(s, 'gens'), k, gen + 1)),
                  'hist', map_put(g(s, 'hist'), k, cap([hrow | list_or_empty(map_get(g(s, 'hist'), k))], 300))), 'trials', g(s, 'trials') + ntr), 'last', map_put(g(s, 'last'), k, hrow)), 'ms', map_put(g(s, 'ms'), k, ms))
             # every 8 generations a pool's champion also moves to the next pool
             if (gen % 8 == 7 && n > 1) { dst = map_get(g(s, 'pids'), (k + 1) % n)  if (dst == nil) { 'x' } else { send(dst, {'mig', elem(be, 0), elem(be, 1), elem(be, 5)}) } } else { 'x' }
@@ -2842,7 +2870,7 @@ fun hub_loop(s) {
             n = g(s, 'n')
             k = r % n
             e = map_get(g(s, 'best'), k)
-            send(from, {'champ', e, map_get(g(s, 'rival'), k), k})
+            send(from, {'champ', e, map_get(g(s, 'rival'), k), k, map_get(g(s, 'preyb'), k)})
             hub_loop(if (e == nil) { s } else { p(s, 'show', [k, elem(e, 6), elem(e, 5), r2(elem(e, 2)), r2(elem(e, 3)), r2(elem(e, 4))]) })
         _o -> hub_loop(s)
     }
@@ -2852,17 +2880,17 @@ fun hub_loop(s) {
 fun showcase(hub, r) {
     send(hub, {'get', self(), r})
     receive {
-        {'champ', e, o, k} ->
-            if (e == nil || o == nil) { sleep(2000)  showcase(hub, r + 1) }
+        {'champ', e, o, k, pr} ->
+            if (e == nil || o == nil || pr == nil) { sleep(2000)  showcase(hub, r + 1) }
             else {
                 me = self()
                 seed = random_int(1, 1000000)
                 c = tr_new(elem(e, 0), elem(e, 1), 1, 0.8, 0.8, 1.0, 0.0)
                 LiveView.broadcast("arena", {'frame', json_encode(%{t: "ev", n: "champ", d: %{k: k, id: elem(e, 6), gen: elem(e, 5), sc: [r2(elem(e, 2)), r2(elem(e, 3)), r2(elem(e, 4))],
                     body: live_bodies([c]), nn: g(c, 'nn'), nc: length(elem(phenotype(elem(e, 0), elem(e, 1)), 2)), ph: r2l(g(c, 'ph')), mass: r2(g(c, 'mass'))}})})
-                spawn(live_task(me, 0, e, o, seed))
-                spawn(live_task(me, 1, e, o, seed))
-                spawn(live_task(me, 2, e, o, seed))
+                spawn(live_task(me, 0, e, o, pr, seed))
+                spawn(live_task(me, 1, e, o, pr, seed))
+                spawn(live_task(me, 2, e, o, pr, seed))
                 wait_done(3)
                 sleep(1500)
                 showcase(hub, r + 1)
@@ -2870,9 +2898,9 @@ fun showcase(hub, r) {
         after 5000 { showcase(hub, r) }
     }
 }
-fun live_task(me, task, e, o, seed) {
+fun live_task(me, task, e, o, pr, seed) {
     if (task == 0) { t_light(elem(e, 0), elem(e, 1), seed, 1, 1) }
-    else { if (task == 1) { t_chase(elem(e, 0), elem(e, 1), seed, 1, 1) } else { live_bouts(e, o, timestamp(), 0) } }
+    else { if (task == 1) { t_chase(elem(e, 0), elem(e, 1), elem(pr, 0), elem(pr, 1), seed, 1, 1) } else { live_bouts(e, o, timestamp(), 0) } }
     send(me, {'done'})
 }
 # a duel can end in a knockout long before the other two trials finish: keep showing rematches meanwhile
@@ -2922,7 +2950,7 @@ fun arena_main() {
     ne = getenv("ARENA_POOLS")
     n0 = if (ne == nil || ne == "") { 8 } else { to_int(ne) }
     n = if (n0 < 1) { 1 } else { if (n0 > 32) { 32 } else { n0 } }
-    hub = spawn(hub_loop(%{n: n, pids: %{}, best: %{}, rival: %{}, hist: %{}, gens: %{}, last: %{}, ms: %{}, trials: 0, t0: timestamp(), bc: 0, wr: 0, show: []}))
+    hub = spawn(hub_loop(%{n: n, preyb: %{}, pids: %{}, best: %{}, rival: %{}, hist: %{}, gens: %{}, last: %{}, ms: %{}, trials: 0, t0: timestamp(), bc: 0, wr: 0, show: []}))
     register('arena_hub', hub)
     start_pools(hub, 0, n)
     spawn(hub_ticker(hub))
