@@ -1663,7 +1663,7 @@ fun birth(tab, world, s, ha, hb, gen, sp, x, y, e, mom, dad, kind) {
     }
 }
 
-# ---- the family tree: one record per creature, kept in ETS by id (the last 30000 per island)
+# ---- the family tree: one record per creature, kept in ETS by id (never deleted: ets_delete corrupts memory under load, swarmrt#190)
 # [id, mom, dad, gen, species, born, island, died, kids, cause, size, speed, armor, attack, sight, diet, p1, p2, p3, hue, neurons, kind]
 fun lin_key(id) { k_lin + id }
 fun lin_put(tab, c, s, kind) {
@@ -1672,8 +1672,7 @@ fun lin_put(tab, c, s, kind) {
     tput(tab, lin_key(id), [id, g(c, 'mom'), g(c, 'dad'), g(c, 'gen'), g(c, 'sp'), g(s, 'tick'), g(s, 'isl'), 0, 0, 0,
         r2(nth(ph, 0)), r2(nth(ph, 1)), r2(nth(ph, 2)), r2(nth(ph, 3)), r2(nth(ph, 4)), r2(nth(ph, 5)), r2(nth(ph, 7)), r2(nth(ph, 8)), r2(nth(ph, 9)),
         Math.round(nth(ph, 6)), g(c, 'nn'), kind])
-    old = id - 30000
-    if (old > g(s, 'isl') * 10000000) { ets_delete(tab + lin_key(old) % 16, lin_key(old))  ets_delete(tab + (k_dead + old) % 16, k_dead + old) } else { 'x' }
+    'ok'
 }
 fun set_at(l, k, v) { if (k == 0) { [v | tl(l)] } else { [hd(l) | set_at(tl(l), k - 1, v)] } }
 # death info goes under its own key, written once (records are never overwritten in place)
@@ -2443,8 +2442,16 @@ fun watchdog(tab, isl) {
 fun watch(tab, isl, w) {
     sleep(2000)
     if (timestamp() - num(cget(tab, k_isl + 100 + isl)) > 20000) {
-        eprint("[evolve4] island " ++ to_string(isl) ++ " stopped responding; restarting it from its last checkpoint")
-        watchdog(tab, isl)
+        n = num(cget(tab, k_isl + 900 + isl)) + 1
+        cput(tab, k_isl + 900 + isl, n)
+        if (n >= 3) {
+            # the same island hung 3 times: the process memory is likely corrupt; exit so run-forever.sh restarts everything from checkpoints
+            eprint("[evolve4] island " ++ to_string(isl) ++ " hung 3 times; exiting for a clean restart")
+            sys_exit(3)
+        } else {
+            eprint("[evolve4] island " ++ to_string(isl) ++ " stopped responding; restarting it from its last checkpoint")
+            watchdog(tab, isl)
+        }
     } else { watch(tab, isl, w) }
 }
 
