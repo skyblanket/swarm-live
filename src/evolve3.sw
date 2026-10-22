@@ -1540,7 +1540,7 @@ fun load(tab, world, s, name) {
     path = ck_dir ++ "/" ++ name
     if (file_exists(path) != 'true') { s }
     else {
-        d = json_decode(file_read(path))
+        d = json_decode(read_text(path))
         if (d == nil || g(d, 'cr') == nil) { s }
         else {
             kill_all(g(s, 'crs'))
@@ -1560,6 +1560,10 @@ fun load(tab, world, s, name) {
         }
     }
 }
+
+# file_read returns an empty string for files over 1 MiB (skyblanket/swarmrt), and island saves get
+# bigger than that, so files are read as bytes
+fun read_text(path) { bytes_to_string(file_read_bytes(path)) }
 
 fun kill_all(crs) { if (length(crs) == 0) { 'ok' } else { kill_brain(hd(crs))  kill_all(tl(crs)) } }
 

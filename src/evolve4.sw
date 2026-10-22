@@ -1814,13 +1814,13 @@ fun set_locus(b, k, v) { if (k == 0) { [[v, nth(hd(b), 1)] | tl(b)] } else { [hd
 fun load_seeds(s) {
     path = ck_dir ++ "/brains.json"
     if (file_exists(path) != 'true') { s }
-    else { d = json_decode(file_read(path))  if (d == nil) { s } else { p(s, 'seeds', list_or_empty(g(d, 'cr'))) } }
+    else { d = json_decode(read_text(path))  if (d == nil) { s } else { p(s, 'seeds', list_or_empty(g(d, 'cr'))) } }
 }
 fun seeded_founders(tab, world, s, k) {
     path = ck_dir ++ "/brains.json"
     if (file_exists(path) != 'true') { founders(tab, world, s, k) }
     else {
-        d = json_decode(file_read(path))
+        d = json_decode(read_text(path))
         lst = if (d == nil) { [] } else { list_or_empty(g(d, 'cr')) }
         if (length(lst) == 0) { founders(tab, world, s, k) } else { sf_loop(tab, world, p(s, 'seeds', lst), k, lst) }
     }
@@ -1977,7 +1977,7 @@ fun load(tab, world, s, name) {
     path = ck_dir ++ "/" ++ name
     if (file_exists(path) != 'true') { s }
     else {
-        d = json_decode(file_read(path))
+        d = json_decode(read_text(path))
         if (d == nil || g(d, 'cr') == nil) { s }
         else {
             kill_all(g(s, 'crs'))
@@ -1997,6 +1997,10 @@ fun load(tab, world, s, name) {
         }
     }
 }
+
+# file_read returns an empty string for files over 1 MiB (skyblanket/swarmrt), and island saves get
+# bigger than that, so files are read as bytes
+fun read_text(path) { bytes_to_string(file_read_bytes(path)) }
 
 fun kill_all(crs) { if (length(crs) == 0) { 'ok' } else { kill_brain(hd(crs))  kill_all(tl(crs)) } }
 
