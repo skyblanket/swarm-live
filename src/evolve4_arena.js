@@ -27,7 +27,7 @@
 
   function build() {
     var m = $('amain'); if (!m || m.children.length) return;
-    var h = '<div class="tasks">';
+    var h = '<div class="stbar"><span>Look</span><div class="seg2"><button id="st-sym">Symbiote</button><button id="st-pix">Pixel</button></div></div><div class="tasks">';
     for (var i = 0; i < 3; i++) {
       h += '<div class="card task"><canvas id="tc' + i + '"></canvas><div class="th"><div class="big">' + TASKS[i].name + '</div><div class="sub">' + TASKS[i].sub + '</div></div>' +
         '<div class="sc"><b id="ts' + i + '">&ndash;</b><span id="tu' + i + '">' + TASKS[i].unit + '</span></div><div class="pb"><i id="tp' + i + '" style="width:0"></i></div></div>';
@@ -38,6 +38,9 @@
       '<div><div class="k">Light: pellets reached</div><canvas id="ch0"></canvas></div><div><div class="k">Hunt: prey caught</div><canvas id="ch1"></canvas></div><div><div class="k">Fight: damage dealt &minus; half taken</div><canvas id="ch2"></canvas></div></div>' +
       '<p class="cap">In the open world most creatures could get by drifting through algae, so nothing pushed them to move well. Here every genome is <b>tested</b>: each generation it swims for far, drifting pellets, hunts a prey, and fights two other genomes. Reaching the light and the hunt are divided by a size cost, and a pellet only counts when a mouth touches it, so a body that spins in place and sweeps its limbs scores nothing. The prey are not scripted: every pool also evolves 80 prey genomes, scored on how far they stay from the hunters, so hunters and prey drive each other (an arms race). Every trial is its own swarmrt process, so a generation runs thousands of trials at once. A genome’s fitness is its average rank over the three tasks. The best 6 survive unchanged; the rest of the pool is bred from tournament winners (two parents, meiosis, mutation), so bodies and brains change together. Bodies, physics, senses and the brain (with its evolved learning rule) are exactly those of Evolution 4, and the pools started from its evolved creatures. Every 15 seconds the pools’ champions are written to a file; each Evolution 4 island takes one in every 3000 ticks, so they compete in the open world too.</p></div>';
     m.innerHTML = h;
+    $('st-sym').onclick = function () { setStyle('symbiote'); };
+    $('st-pix').onclick = function () { setStyle('pixel'); };
+    setStyle(STYLE);
   }
 
   /* ---------- events: keep the latest frame per task, and turn changes into effects ---------- */
@@ -64,6 +67,7 @@
         if (dh > 0) {
           var core = d.b[i][1];
           burst(t, core[3] / 1000, core[4] / 1000, Math.min(24, 4 + dh * 2), [255, 90, 70], 0.003);
+          burst(t, core[3] / 1000, core[4] / 1000, Math.min(16, 3 + dh), [8, 9, 14], 0.0045);
           texts[t].push({ x: core[3] / 1000, y: core[4] / 1000, age: 0, txt: '-' + dh, col: '#ff6a5a' });
         }
       }
@@ -79,6 +83,7 @@
         if (pj >= 0) { dxj = jx - bd[pj * 5 + 3]; dyj = jy - bd[pj * 5 + 4]; var lj = Math.sqrt(dxj * dxj + dyj * dyj) || 1; dxj /= lj; dyj /= lj; }
         for (var q2 = 0; q2 < 4; q2++) parts[t].push({ x: jx / 1000, y: jy / 1000, vx: dxj * 0.003 + (Math.random() - 0.5) * 0.001, vy: dyj * 0.003 + (Math.random() - 0.5) * 0.001, age: 0, life: 12 + Math.random() * 10, col: Math.random() < 0.5 ? [255, 160, 60] : [255, 230, 120], sz: 2 });
       }
+      if (Math.random() < 0.06) { var dn = Math.floor(Math.random() * bd.length / 5); parts[t].push({ x: bd[dn * 5 + 3] / 1000, y: bd[dn * 5 + 4] / 1000, vx: 0, vy: 0.00035, age: 0, life: 35, col: [6, 7, 12], sz: Math.random() < 0.5 ? 2 : 1 }); }
       if (B[7] > 0 && Math.random() < 0.5) parts[t].push({ x: bd[3] / 1000 + (Math.random() - 0.5) * 0.02, y: bd[4] / 1000 + (Math.random() - 0.5) * 0.02, vx: 0, vy: -0.0004, age: 0, life: 30, col: [125, 255, 150], sz: Math.random() < 0.3 ? 2 : 1 });
       /* bubbles from fins and the core while it swims */
       var th = Math.abs(B[4]) / 100;
@@ -233,6 +238,141 @@
     }
   }
 
+  /* ---------- the symbiote look: the same nodes and limbs, drawn as one blended blob of glossy black goo ----------
+     Every node and limb adds to a field (a node r^2/d^2, a limb the same around its segment); where the field
+     passes 1 the goo is solid, so neighbours melt into each other and joints bulge. Limbs swell in waves that
+     run along them and nodes jiggle, so the goo looks alive. Shading fakes a dome: flat and dark in the middle,
+     tilted at the edge, lit from the upper left with a sharp white sheen, and a rim tinted by the creature's hue. */
+  var STYLE = 'symbiote';
+  try { var sv = localStorage.getItem('arena-style'); if (sv === 'pixel' || sv === 'symbiote') STYLE = sv; } catch (e) {}
+  function setStyle(v) { STYLE = v; try { localStorage.setItem('arena-style', v); } catch (e) {} var b1 = $('st-sym'), b2 = $('st-pix'); if (b1) b1.classList.toggle('on', v === 'symbiote'); if (b2) b2.classList.toggle('on', v === 'pixel'); if (champ) drawChamp(); }
+  function hrgb(h, s, l) {
+    h = ((h % 360) + 360) % 360 / 360; s /= 100; l /= 100;
+    var q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+    var f = function (t) { if (t < 0) t += 1; if (t > 1) t -= 1; return t < 1 / 6 ? p + (q - p) * 6 * t : t < 0.5 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p; };
+    return [f(h + 1 / 3) * 255, f(h) * 255, f(h - 1 / 3) * 255];
+  }
+  var layers = {};
+  function getLayer(key, w, h) {
+    var L = layers[key];
+    if (!L || L.w !== w || L.h !== h) {
+      var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      var g = cv.getContext('2d'), img = g.createImageData(w, h);
+      L = layers[key] = { cv: cv, g: g, img: img, u32: new Uint32Array(img.data.buffer), w: w, h: h };
+    }
+    return L;
+  }
+  var LX = -0.45, LY = -0.6, LZ = 0.66, HX = -0.24, HY = -0.32, HZ = 0.92;
+  function gooField(L, bd, hue, P, s, now) {
+    var n = P.length, i, rp = function (i) { return Math.max(1, bd[i * 5 + 1] / 10000 / WS * s); };
+    var Q = [], nodes = [], segs = [];
+    for (i = 0; i < n; i++) Q.push([P[i][0] + Math.sin(now / 310 + i * 1.7) * 0.5, P[i][1] + Math.cos(now / 370 + i * 2.3) * 0.5]);
+    for (i = 0; i < n; i++) {
+      var ty = bd[i * 5]; if (ty === 1 || ty === 7) continue;
+      var R = Math.max(2.2, rp(i) * (ty === 6 ? 2.4 : ty === 3 ? 2.0 : ty === 2 ? 2.0 : 1.8));
+      nodes.push([Q[i][0], Q[i][1], R * R]);
+    }
+    for (i = 1; i < n; i++) {
+      var pi = bd[i * 5 + 2]; if (pi < 0 || pi >= n) continue;
+      var rr = Math.max(1.5, Math.min(rp(pi), rp(i)) * (bd[i * 5] === 3 ? 1.5 : 1.15));
+      segs.push([Q[pi][0], Q[pi][1], Q[i][0], Q[i][1], rr, i]);
+    }
+    var x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (i = 0; i < n; i++) { var m = rp(i) * 4 + 8; x0 = Math.min(x0, Q[i][0] - m); x1 = Math.max(x1, Q[i][0] + m); y0 = Math.min(y0, Q[i][1] - m); y1 = Math.max(y1, Q[i][1] + m); }
+    x0 = Math.max(1, Math.floor(x0)); y0 = Math.max(1, Math.floor(y0)); x1 = Math.min(L.w - 2, Math.ceil(x1)); y1 = Math.min(L.h - 2, Math.ceil(y1));
+    if (x1 <= x0 || y1 <= y0) return;
+    var W = x1 - x0 + 3, H = y1 - y0 + 3, F = new Float32Array(W * H), tt = now / 220;
+    for (var yy = 0; yy < H; yy++) {
+      var py = y0 - 1 + yy;
+      for (var xx = 0; xx < W; xx++) {
+        var px = x0 - 1 + xx, f = 0, k, e;
+        for (k = 0; k < nodes.length; k++) { e = nodes[k]; var dx = px - e[0], dy = py - e[1]; f += e[2] / (dx * dx + dy * dy + 0.6); }
+        for (k = 0; k < segs.length; k++) {
+          e = segs[k]; var vx = e[2] - e[0], vy = e[3] - e[1], ll = vx * vx + vy * vy + 0.0001;
+          var u = ((px - e[0]) * vx + (py - e[1]) * vy) / ll; u = u < 0 ? 0 : u > 1 ? 1 : u;
+          var qx = px - (e[0] + vx * u), qy = py - (e[1] + vy * u);
+          var r = e[4] * (1 + 0.22 * Math.sin(tt - u * 5 + e[5]));
+          f += r * r / (qx * qx + qy * qy + 0.6);
+        }
+        F[yy * W + xx] = f;
+      }
+    }
+    var rim = hrgb(hue, 70, 55), u32 = L.u32;
+    for (yy = 1; yy < H - 1; yy++) {
+      var py2 = y0 - 1 + yy;
+      for (xx = 1; xx < W - 1; xx++) {
+        var f2 = F[yy * W + xx]; if (f2 < 0.5) continue;
+        var px2 = x0 - 1 + xx, idx = py2 * L.w + px2;
+        if (f2 < 1) { var a = Math.round(110 * (f2 - 0.5) / 0.5); if (((u32[idx] >>> 24) & 255) < a) u32[idx] = (a << 24) >>> 0; continue; }
+        var gx = F[yy * W + xx + 1] - F[yy * W + xx - 1], gy = F[(yy + 1) * W + xx] - F[(yy - 1) * W + xx], gl = Math.sqrt(gx * gx + gy * gy) + 1e-6;
+        var edge = 1 - Math.min(1, (f2 - 1) / 1.6), nx = -gx / gl * edge, ny = -gy / gl * edge, nz = Math.sqrt(Math.max(0, 1 - edge * edge));
+        var diff = Math.max(0, nx * LX + ny * LY + nz * LZ), sp = Math.max(0, nx * HX + ny * HY + nz * HZ);
+        sp = Math.pow(sp, 26);
+        var bay = BAYER[(py2 & 3) * 4 + (px2 & 3)] / 16 - 0.5;
+        var sq = sp + bay * 0.25; sq = sq > 0.8 ? 1 : sq > 0.45 ? 0.6 : sq > 0.2 ? 0.25 : 0;
+        var rm = Math.pow(edge, 4) * 0.55;
+        var R2 = 5 + diff * 24 + rim[0] * rm + 235 * sq, G2 = 6 + diff * 30 + rim[1] * rm + 240 * sq, B2 = 10 + diff * 46 + rim[2] * rm + 255 * sq;
+        u32[idx] = 0xff000000 | (Math.min(255, B2) << 16) | (Math.min(255, G2) << 8) | Math.min(255, R2 | 0);
+      }
+    }
+  }
+  /* what sits on the goo: blades, Venom eyes, toothy grins, jets */
+  function gooParts(g, bd, hue, P, s, look, now, bite, boost) {
+    var n = P.length, i, rp = function (i) { return Math.max(1, bd[i * 5 + 1] / 10000 / WS * s); };
+    var dirOf = function (i) {
+      var p2 = bd[i * 5 + 2]; if (i === 0 || p2 < 0 || p2 >= n) return [1, 0];
+      var lx = P[i][0] - P[p2][0], ly = P[i][1] - P[p2][1], ll = Math.sqrt(lx * lx + ly * ly) || 1; return [lx / ll, ly / ll];
+    };
+    for (i = 0; i < n; i++) {
+      var T = bd[i * 5], x = P[i][0], y = P[i][1], R = Math.max(1.6, rp(i) * 1.7), d = dirOf(i), nx = -d[1], ny = d[0];
+      if (T === 1 || T === 7) {
+        var R2 = R + 0.6, len = R2 * (3.2 + 0.3 * Math.sin(now / 260 + i)), bend = Math.sin(now / 340 + i * 2.1) * R2 * 0.6;
+        var tip = [x + d[0] * len + nx * bend, y + d[1] * len + ny * bend];
+        tri(g, [x + nx * (R2 + 1), y + ny * (R2 + 1)], [tip[0] + d[0], tip[1] + d[1]], [x - nx * (R2 + 1), y - ny * (R2 + 1)], '#000000');
+        tri(g, [x + nx * R2, y + ny * R2], tip, [x - nx * R2, y - ny * R2], '#07080d');
+        tri(g, [x + nx * R2 * 0.7, y + ny * R2 * 0.7], tip, [x + nx * R2 * 0.2, y + ny * R2 * 0.2], T === 7 ? '#5a2a7a' : '#3c4868');
+        g.fillStyle = T === 7 ? '#7dff9a' : '#dfe6ff'; g.fillRect(Math.round(tip[0]), Math.round(tip[1]), 1, 1);
+        if (T === 7 && (now / 300 + i) % 2 < 1) g.fillRect(Math.round(tip[0] + d[0] * 2), Math.round(tip[1] + d[1] * 2 + 1), 1, 1);
+      } else if (T === 5) {
+        var ex = d[0], ey = d[1];
+        if (look) { var lx2 = look[0] - x, ly2 = look[1] - y, l2 = Math.sqrt(lx2 * lx2 + ly2 * ly2) || 1; ex = lx2 / l2; ey = ly2 / l2; }
+        var c = Math.cos(0.7), sn = Math.sin(0.7), ux = ex * c - ey * sn, uy = ex * sn + ey * c;
+        ellipse(g, x, y, ux, uy, R * 1.9 + 1, R * 0.95 + 1, '#000000');
+        ellipse(g, x, y, ux, uy, R * 1.9, R * 0.95, '#f2f5ff');
+        ellipse(g, x - ux * R * 0.6, y - uy * R * 0.6, ux, uy, R * 0.7, R * 0.35, '#ffffff');
+      } else if (T === 4) {
+        var open = bite > 0.3 ? 0.95 + 0.15 * Math.sin(now / 60) : 0.75;
+        ellipse(g, x, y, nx, ny, R * 1.25 * open + 0.5, R * 0.75 * open + 0.5, '#2a0408');
+        ellipse(g, x, y, nx, ny, R * 1.15 * open, R * 0.6 * open, '#120105');
+        var nt = Math.max(5, Math.round(R * 3));
+        for (var k = 0; k < nt; k++) {
+          var a = k * 6.2832 / nt, cx2 = Math.cos(a), cy2 = Math.sin(a);
+          var ox = x + (nx * cx2 * R * 1.2 + d[0] * cy2 * R * 0.7) * open, oy = y + (ny * cx2 * R * 1.2 + d[1] * cy2 * R * 0.7) * open;
+          var ix = x + (ox - x) * 0.55, iy = y + (oy - y) * 0.55;
+          g.fillStyle = '#f7f3ea'; g.fillRect(Math.round(ox), Math.round(oy), 1, 1); g.fillRect(Math.round((ox + ix) / 2), Math.round((oy + iy) / 2), 1, 1);
+        }
+      } else if (T === 8) {
+        if (boost > 0) {
+          var fl = R * (2.5 + Math.random() * 1.5);
+          tri(g, [x - d[1] * R, y + d[0] * R], [x + d[0] * fl * 1.6, y + d[1] * fl * 1.6], [x + d[1] * R, y - d[0] * R], '#ff8a2a');
+          tri(g, [x - d[1] * R * 0.5, y + d[0] * R * 0.5], [x + d[0] * fl, y + d[1] * fl], [x + d[1] * R * 0.5, y - d[0] * R * 0.5], '#ffe27a');
+        }
+        disc(g, x + d[0] * R * 0.4, y + d[1] * R * 0.4, Math.max(0.8, R * 0.55), boost > 0 ? '#ffb060' : '#7a2a08');
+      } else if (T === 2) {
+        g.fillStyle = 'rgba(120,135,170,0.55)'; g.fillRect(Math.round(x - R * 0.5), Math.round(y - R * 0.6), Math.max(1, Math.round(R)), 1);
+      }
+    }
+  }
+  /* draw one body in the chosen look onto buffer context g (size w x h); key names the goo layer to reuse */
+  function drawBody(key, g, w, h, bd, hue, P, s, look, now, bite, boost) {
+    if (STYLE !== 'symbiote') { drawCreature(g, bd, hue, P, s, look, now, bite, boost); return; }
+    var L = getLayer(key, w, h); L.u32.fill(0);
+    gooField(L, bd, hue, P, s, now);
+    L.g.putImageData(L.img, 0, 0);
+    g.drawImage(L.cv, 0, 0);
+    gooParts(g, bd, hue, P, s, look, now, bite, boost);
+  }
+
   /* ---------- backgrounds: one look per task, computed per pixel in world coordinates so the camera moves through them ---------- */
   var PAL = [
     [[2, 5, 12], [5, 12, 26], [9, 22, 42], [15, 36, 62], [24, 54, 86]],          /* abyss */
@@ -327,6 +467,7 @@
   function drawTask(t, now) {
     var c = fitCanvas(t); if (!c) return;
     var G = c.g, W = c.w, H = c.h, d = st[t];
+    PX = STYLE === 'symbiote' ? 2 : 3;
     var bw = Math.ceil(W / PX), bh = Math.ceil(H / PX), b = getBuf(t, bw, bh), g = b.g;
     /* the camera frames every body and the target, zooming smoothly */
     var mnx = 0.5, mny = 0.5, mxx = 0.5, mxy = 0.5, q, bb;
@@ -367,7 +508,7 @@
         for (i = 0; i < bd.length / 5; i++) P.push([SX(bd[i * 5 + 3] / 1000), SY(bd[i * 5 + 4] / 1000)]);
         var lk = look;
         if (t >= 1 && d.b.length > 1) { var o = d.b[1 - bi][1]; lk = [SX(o[3] / 1000), SY(o[4] / 1000)]; }
-        drawCreature(g, bd, B[0], P, s, lk, now, B[6] / 100, B[8] || 0);
+        drawBody('t' + t + 'b' + bi, g, bw, bh, bd, B[0], P, s, lk, now, B[6] / 100, B[8] || 0);
         if (B[7] > 0) { g.fillStyle = 'rgba(125,255,150,0.5)'; for (var vv = 0; vv < P.length; vv++) if ((vv + Math.floor(now / 120)) % 3 === 0) g.fillRect(Math.round(P[vv][0]), Math.round(P[vv][1]) - 1, 1, 1); }
       }
       /* particles: bubbles rise and fade, bursts fly out */
@@ -470,7 +611,7 @@
     for (i = 0; i < n; i++) { var x = bd[i * 5 + 3], y = bd[i * 5 + 4]; mnx = Math.min(mnx, x); mxx = Math.max(mxx, x); mny = Math.min(mny, y); mxy = Math.max(mxy, y); }
     var span = Math.max(mxx - mnx, mxy - mny, 20) / 1000, s = bw * 0.6 / span, P = [];
     for (i = 0; i < n; i++) P.push([bw / 2 + ((bd[i * 5 + 3] - (mnx + mxx) / 2) / 1000) * s, bh / 2 + ((bd[i * 5 + 4] - (mny + mxy) / 2) / 1000) * s]);
-    drawCreature(g, bd, B[0], P, s, [bw / 2 + 20, bh / 2], performance.now(), 0, 0);
+    drawBody('champ', g, bw, bh, bd, B[0], P, s, [bw / 2 + 20, bh / 2], performance.now(), 0, 0);
     G.imageSmoothingEnabled = false; G.clearRect(0, 0, W, H); G.drawImage(cbuf.cv, 0, 0, W, H);
     var cnt = [0, 0, 0, 0, 0, 0, 0, 0, 0]; for (i = 0; i < n; i++) cnt[bd[i * 5]]++;
     $('c-title').textContent = 'Pool ' + (champ.k + 1) + ' champion';

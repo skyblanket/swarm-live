@@ -3001,6 +3001,7 @@ fun ar_css() {
     ".kv{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}.kv div{font-size:11px;color:var(--mu)}.kv b{display:block;font-size:16px;color:var(--tx);font-weight:600;font-variant-numeric:tabular-nums}" ++
     "table.pt{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}.pt th{color:var(--mu);font-weight:500;text-align:right;padding:4px 6px;border-bottom:1px solid var(--line)}.pt td{text-align:right;padding:4px 6px;border-bottom:1px solid #141414}.pt th:first-child,.pt td:first-child{text-align:left}.pt tr.on td{color:var(--amber)}" ++
     ".charts{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.charts canvas{width:100%;height:120px;display:block}.charts .k{font-size:12px;font-weight:600;margin-bottom:4px}" ++
+    ".stbar{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--mu)}.seg2{display:flex;background:#0d0d0d;border:1px solid var(--line2);border-radius:9px;padding:2px}.seg2 button{font:inherit;font-size:12px;color:var(--mu);background:none;border:0;border-radius:7px;padding:5px 12px;cursor:pointer}.seg2 button.on{background:#ededed;color:#000}" ++
     "@media(max-width:1100px){body{overflow:auto}.tasks,.row2,.charts{grid-template-columns:1fr}}</style>"
 }
 

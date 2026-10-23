@@ -4,7 +4,7 @@ module Evolve4ArenaJs
 
 export [js]
 
-fun js() { part0() ++ part1() ++ part2() }
+fun js() { part0() ++ part1() ++ part2() ++ part3() }
 
 fun part0() {
     "/* The Arena - client. Source of truth for src/Evolve4ArenaJs.sw\n" ++
@@ -36,7 +36,7 @@ fun part0() {
     "\n" ++
     "  function build() {\n" ++
     "    var m = $('amain'); if (!m || m.children.length) return;\n" ++
-    "    var h = '<div class=\"tasks\">';\n" ++
+    "    var h = '<div class=\"stbar\"><span>Look</span><div class=\"seg2\"><button id=\"st-sym\">Symbiote</button><button id=\"st-pix\">Pixel</button></div></div><div class=\"tasks\">';\n" ++
     "    for (var i = 0; i < 3; i++) {\n" ++
     "      h += '<div class=\"card task\"><canvas id=\"tc' + i + '\"></canvas><div class=\"th\"><div class=\"big\">' + TASKS[i].name + '</div><div class=\"sub\">' + TASKS[i].sub + '</div></div>' +\n" ++
     "        '<div class=\"sc\"><b id=\"ts' + i + '\">&ndash;</b><span id=\"tu' + i + '\">' + TASKS[i].unit + '</span></div><div class=\"pb\"><i id=\"tp' + i + '\" style=\"width:0\"></i></div></div>';\n" ++
@@ -47,6 +47,9 @@ fun part0() {
     "      '<div><div class=\"k\">Light: pellets reached</div><canvas id=\"ch0\"></canvas></div><div><div class=\"k\">Hunt: prey caught</div><canvas id=\"ch1\"></canvas></div><div><div class=\"k\">Fight: damage dealt &minus; half taken</div><canvas id=\"ch2\"></canvas></div></div>' +\n" ++
     "      '<p class=\"cap\">In the open world most creatures could get by drifting through algae, so nothing pushed them to move well. Here every genome is <b>tested</b>: each generation it swims for far, drifting pellets, hunts a prey, and fights two other genomes. Reaching the light and the hunt are divided by a size cost, and a pellet only counts when a mouth touches it, so a body that spins in place and sweeps its limbs scores nothing. The prey are not scripted: every pool also evolves 80 prey genomes, scored on how far they stay from the hunters, so hunters and prey drive each other (an arms race). Every trial is its own swarmrt process, so a generation runs thousands of trials at once. A genome’s fitness is its average rank over the three tasks. The best 6 survive unchanged; the rest of the pool is bred from tournament winners (two parents, meiosis, mutation), so bodies and brains change together. Bodies, physics, senses and the brain (with its evolved learning rule) are exactly those of Evolution 4, and the pools started from its evolved creatures. Every 15 seconds the pools’ champions are written to a file; each Evolution 4 island takes one in every 3000 ticks, so they compete in the open world too.</p></div>';\n" ++
     "    m.innerHTML = h;\n" ++
+    "    $('st-sym').onclick = function () { setStyle('symbiote'); };\n" ++
+    "    $('st-pix').onclick = function () { setStyle('pixel'); };\n" ++
+    "    setStyle(STYLE);\n" ++
     "  }\n" ++
     "\n" ++
     "  /* ---------- events: keep the latest frame per task, and turn changes into effects ---------- */\n" ++
@@ -73,6 +76,7 @@ fun part0() {
     "        if (dh > 0) {\n" ++
     "          var core = d.b[i][1];\n" ++
     "          burst(t, core[3] / 1000, core[4] / 1000, Math.min(24, 4 + dh * 2), [255, 90, 70], 0.003);\n" ++
+    "          burst(t, core[3] / 1000, core[4] / 1000, Math.min(16, 3 + dh), [8, 9, 14], 0.0045);\n" ++
     "          texts[t].push({ x: core[3] / 1000, y: core[4] / 1000, age: 0, txt: '-' + dh, col: '#ff6a5a' });\n" ++
     "        }\n" ++
     "      }\n" ++
@@ -88,6 +92,7 @@ fun part0() {
     "        if (pj >= 0) { dxj = jx - bd[pj * 5 + 3]; dyj = jy - bd[pj * 5 + 4]; var lj = Math.sqrt(dxj * dxj + dyj * dyj) || 1; dxj /= lj; dyj /= lj; }\n" ++
     "        for (var q2 = 0; q2 < 4; q2++) parts[t].push({ x: jx / 1000, y: jy / 1000, vx: dxj * 0.003 + (Math.random() - 0.5) * 0.001, vy: dyj * 0.003 + (Math.random() - 0.5) * 0.001, age: 0, life: 12 + Math.random() * 10, col: Math.random() < 0.5 ? [255, 160, 60] : [255, 230, 120], sz: 2 });\n" ++
     "      }\n" ++
+    "      if (Math.random() < 0.06) { var dn = Math.floor(Math.random() * bd.length / 5); parts[t].push({ x: bd[dn * 5 + 3] / 1000, y: bd[dn * 5 + 4] / 1000, vx: 0, vy: 0.00035, age: 0, life: 35, col: [6, 7, 12], sz: Math.random() < 0.5 ? 2 : 1 }); }\n" ++
     "      if (B[7] > 0 && Math.random() < 0.5) parts[t].push({ x: bd[3] / 1000 + (Math.random() - 0.5) * 0.02, y: bd[4] / 1000 + (Math.random() - 0.5) * 0.02, vx: 0, vy: -0.0004, age: 0, life: 30, col: [125, 255, 150], sz: Math.random() < 0.3 ? 2 : 1 });\n" ++
     "      /* bubbles from fins and the core while it swims */\n" ++
     "      var th = Math.abs(B[4]) / 100;\n" ++
@@ -202,15 +207,15 @@ fun part0() {
     "          disc(g, x, y, R + 1, '#151b26');\n" ++
     "          disc(g, x, y, R, '#7d899c');\n" ++
     "          disc(g, x - R * 0.25, y - R * 0.25, R * 0.6, '#aab6c8');\n" ++
+    ""
+}
+
+fun part1() {
     "          g.fillStyle = '#4a5466'; g.fillRect(Math.round(x - R), Math.round(y), Math.round(2 * R) + 1, 1); g.fillRect(Math.round(x), Math.round(y - R), 1, Math.round(2 * R) + 1);\n" ++
     "        } else if (T === 4) {\n" ++
     "          disc(g, x, y, R + 1, '#2a0508');\n" ++
     "          disc(g, x, y, R, '#8a1c26');\n" ++
     "          var open = bite > 0.3 ? 0.62 + 0.15 * Math.sin(now / 60) : 0.45;\n" ++
-    ""
-}
-
-fun part1() {
     "          disc(g, x, y, R * open, '#120306');\n" ++
     "          var nt = Math.max(4, Math.round(R * 2.2)), rot = now / 900;\n" ++
     "          g.fillStyle = '#f6f0e4';\n" ++
@@ -246,6 +251,141 @@ fun part1() {
     "    }\n" ++
     "  }\n" ++
     "\n" ++
+    "  /* ---------- the symbiote look: the same nodes and limbs, drawn as one blended blob of glossy black goo ----------\n" ++
+    "     Every node and limb adds to a field (a node r^2/d^2, a limb the same around its segment); where the field\n" ++
+    "     passes 1 the goo is solid, so neighbours melt into each other and joints bulge. Limbs swell in waves that\n" ++
+    "     run along them and nodes jiggle, so the goo looks alive. Shading fakes a dome: flat and dark in the middle,\n" ++
+    "     tilted at the edge, lit from the upper left with a sharp white sheen, and a rim tinted by the creature's hue. */\n" ++
+    "  var STYLE = 'symbiote';\n" ++
+    "  try { var sv = localStorage.getItem('arena-style'); if (sv === 'pixel' || sv === 'symbiote') STYLE = sv; } catch (e) {}\n" ++
+    "  function setStyle(v) { STYLE = v; try { localStorage.setItem('arena-style', v); } catch (e) {} var b1 = $('st-sym'), b2 = $('st-pix'); if (b1) b1.classList.toggle('on', v === 'symbiote'); if (b2) b2.classList.toggle('on', v === 'pixel'); if (champ) drawChamp(); }\n" ++
+    "  function hrgb(h, s, l) {\n" ++
+    "    h = ((h % 360) + 360) % 360 / 360; s /= 100; l /= 100;\n" ++
+    "    var q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;\n" ++
+    "    var f = function (t) { if (t < 0) t += 1; if (t > 1) t -= 1; return t < 1 / 6 ? p + (q - p) * 6 * t : t < 0.5 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p; };\n" ++
+    "    return [f(h + 1 / 3) * 255, f(h) * 255, f(h - 1 / 3) * 255];\n" ++
+    "  }\n" ++
+    "  var layers = {};\n" ++
+    "  function getLayer(key, w, h) {\n" ++
+    "    var L = layers[key];\n" ++
+    "    if (!L || L.w !== w || L.h !== h) {\n" ++
+    "      var cv = document.createElement('canvas'); cv.width = w; cv.height = h;\n" ++
+    "      var g = cv.getContext('2d'), img = g.createImageData(w, h);\n" ++
+    "      L = layers[key] = { cv: cv, g: g, img: img, u32: new Uint32Array(img.data.buffer), w: w, h: h };\n" ++
+    "    }\n" ++
+    "    return L;\n" ++
+    "  }\n" ++
+    "  var LX = -0.45, LY = -0.6, LZ = 0.66, HX = -0.24, HY = -0.32, HZ = 0.92;\n" ++
+    "  function gooField(L, bd, hue, P, s, now) {\n" ++
+    "    var n = P.length, i, rp = function (i) { return Math.max(1, bd[i * 5 + 1] / 10000 / WS * s); };\n" ++
+    "    var Q = [], nodes = [], segs = [];\n" ++
+    "    for (i = 0; i < n; i++) Q.push([P[i][0] + Math.sin(now / 310 + i * 1.7) * 0.5, P[i][1] + Math.cos(now / 370 + i * 2.3) * 0.5]);\n" ++
+    "    for (i = 0; i < n; i++) {\n" ++
+    "      var ty = bd[i * 5]; if (ty === 1 || ty === 7) continue;\n" ++
+    "      var R = Math.max(2.2, rp(i) * (ty === 6 ? 2.4 : ty === 3 ? 2.0 : ty === 2 ? 2.0 : 1.8));\n" ++
+    "      nodes.push([Q[i][0], Q[i][1], R * R]);\n" ++
+    "    }\n" ++
+    "    for (i = 1; i < n; i++) {\n" ++
+    "      var pi = bd[i * 5 + 2]; if (pi < 0 || pi >= n) continue;\n" ++
+    "      var rr = Math.max(1.5, Math.min(rp(pi), rp(i)) * (bd[i * 5] === 3 ? 1.5 : 1.15));\n" ++
+    "      segs.push([Q[pi][0], Q[pi][1], Q[i][0], Q[i][1], rr, i]);\n" ++
+    "    }\n" ++
+    "    var x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;\n" ++
+    "    for (i = 0; i < n; i++) { var m = rp(i) * 4 + 8; x0 = Math.min(x0, Q[i][0] - m); x1 = Math.max(x1, Q[i][0] + m); y0 = Math.min(y0, Q[i][1] - m); y1 = Math.max(y1, Q[i][1] + m); }\n" ++
+    "    x0 = Math.max(1, Math.floor(x0)); y0 = Math.max(1, Math.floor(y0)); x1 = Math.min(L.w - 2, Math.ceil(x1)); y1 = Math.min(L.h - 2, Math.ceil(y1));\n" ++
+    "    if (x1 <= x0 || y1 <= y0) return;\n" ++
+    "    var W = x1 - x0 + 3, H = y1 - y0 + 3, F = new Float32Array(W * H), tt = now / 220;\n" ++
+    "    for (var yy = 0; yy < H; yy++) {\n" ++
+    "      var py = y0 - 1 + yy;\n" ++
+    "      for (var xx = 0; xx < W; xx++) {\n" ++
+    "        var px = x0 - 1 + xx, f = 0, k, e;\n" ++
+    "        for (k = 0; k < nodes.length; k++) { e = nodes[k]; var dx = px - e[0], dy = py - e[1]; f += e[2] / (dx * dx + dy * dy + 0.6); }\n" ++
+    "        for (k = 0; k < segs.length; k++) {\n" ++
+    "          e = segs[k]; var vx = e[2] - e[0], vy = e[3] - e[1], ll = vx * vx + vy * vy + 0.0001;\n" ++
+    "          var u = ((px - e[0]) * vx + (py - e[1]) * vy) / ll; u = u < 0 ? 0 : u > 1 ? 1 : u;\n" ++
+    "          var qx = px - (e[0] + vx * u), qy = py - (e[1] + vy * u);\n" ++
+    "          var r = e[4] * (1 + 0.22 * Math.sin(tt - u * 5 + e[5]));\n" ++
+    "          f += r * r / (qx * qx + qy * qy + 0.6);\n" ++
+    "        }\n" ++
+    "        F[yy * W + xx] = f;\n" ++
+    "      }\n" ++
+    "    }\n" ++
+    "    var rim = hrgb(hue, 70, 55), u32 = L.u32;\n" ++
+    "    for (yy = 1; yy < H - 1; yy++) {\n" ++
+    "      var py2 = y0 - 1 + yy;\n" ++
+    "      for (xx = 1; xx < W - 1; xx++) {\n" ++
+    "        var f2 = F[yy * W + xx]; if (f2 < 0.5) continue;\n" ++
+    "        var px2 = x0 - 1 + xx, idx = py2 * L.w + px2;\n" ++
+    "        if (f2 < 1) { var a = Math.round(110 * (f2 - 0.5) / 0.5); if (((u32[idx] >>> 24) & 255) < a) u32[idx] = (a << 24) >>> 0; continue; }\n" ++
+    "        var gx = F[yy * W + xx + 1] - F[yy * W + xx - 1], gy = F[(yy + 1) * W + xx] - F[(yy - 1) * W + xx], gl = Math.sqrt(gx * gx + gy * gy) + 1e-6;\n" ++
+    "        var edge = 1 - Math.min(1, (f2 - 1) / 1.6), nx = -gx / gl * edge, ny = -gy / gl * edge, nz = Math.sqrt(Math.max(0, 1 - edge * edge));\n" ++
+    "        var diff = Math.max(0, nx * LX + ny * LY + nz * LZ), sp = Math.max(0, nx * HX + ny * HY + nz * HZ);\n" ++
+    "        sp = Math.pow(sp, 26);\n" ++
+    "        var bay = BAYER[(py2 & 3) * 4 + (px2 & 3)] / 16 - 0.5;\n" ++
+    "        var sq = sp + bay * 0.25; sq = sq > 0.8 ? 1 : sq > 0.45 ? 0.6 : sq > 0.2 ? 0.25 : 0;\n" ++
+    "        var rm = Math.pow(edge, 4) * 0.55;\n" ++
+    "        var R2 = 5 + diff * 24 + rim[0] * rm + 235 * sq, G2 = 6 + diff * 30 + rim[1] * rm + 240 * sq, B2 = 10 + diff * 46 + rim[2] * rm + 255 * sq;\n" ++
+    "        u32[idx] = 0xff000000 | (Math.min(255, B2) << 16) | (Math.min(255, G2) << 8) | Math.min(255, R2 | 0);\n" ++
+    "      }\n" ++
+    "    }\n" ++
+    "  }\n" ++
+    "  /* what sits on the goo: blades, Venom eyes, toothy grins, jets */\n" ++
+    "  function gooParts(g, bd, hue, P, s, look, now, bite, boost) {\n" ++
+    "    var n = P.length, i, rp = function (i) { return Math.max(1, bd[i * 5 + 1] / 10000 / WS * s); };\n" ++
+    "    var dirOf = function (i) {\n" ++
+    "      var p2 = bd[i * 5 + 2]; if (i === 0 || p2 < 0 || p2 >= n) return [1, 0];\n" ++
+    "      var lx = P[i][0] - P[p2][0], ly = P[i][1] - P[p2][1], ll = Math.sqrt(lx * lx + ly * ly) || 1; return [lx / ll, ly / ll];\n" ++
+    "    };\n" ++
+    "    for (i = 0; i < n; i++) {\n" ++
+    "      var T = bd[i * 5], x = P[i][0], y = P[i][1], R = Math.max(1.6, rp(i) * 1.7), d = dirOf(i), nx = -d[1], ny = d[0];\n" ++
+    "      if (T === 1 || T === 7) {\n" ++
+    "        var R2 = R + 0.6, len = R2 * (3.2 + 0.3 * Math.sin(now / 260 + i)), bend = Math.sin(now / 340 + i * 2.1) * R2 * 0.6;\n" ++
+    "        var tip = [x + d[0] * len + nx * bend, y + d[1] * len + ny * bend];\n" ++
+    "        tri(g, [x + nx * (R2 + 1), y + ny * (R2 + 1)], [tip[0] + d[0], tip[1] + d[1]], [x - nx * (R2 + 1), y - ny * (R2 + 1)], '#000000');\n" ++
+    "        tri(g, [x + nx * R2, y + ny * R2], tip, [x - nx * R2, y - ny * R2], '#07080d');\n" ++
+    "        tri(g, [x + nx * R2 * 0.7, y + ny * R2 * 0.7], tip, [x + nx * R2 * 0.2, y + ny * R2 * 0.2], T === 7 ? '#5a2a7a' : '#3c4868');\n" ++
+    "        g.fillStyle = T === 7 ? '#7dff9a' : '#dfe6ff'; g.fillRect(Math.round(tip[0]), Math.round(tip[1]), 1, 1);\n" ++
+    "        if (T === 7 && (now / 300 + i) % 2 < 1) g.fillRect(Math.round(tip[0] + d[0] * 2), Math.round(tip[1] + d[1] * 2 + 1), 1, 1);\n" ++
+    "      } else if (T === 5) {\n" ++
+    "        var ex = d[0], ey = d[1];\n" ++
+    "        if (look) { var lx2 = look[0] - x, ly2 = look[1] - y, l2 = Math.sqrt(lx2 * lx2 + ly2 * ly2) || 1; ex = lx2 / l2; ey = ly2 / l2; }\n" ++
+    "        var c = Math.cos(0.7), sn = Math.sin(0.7), ux = ex * c - ey * sn, uy = ex * sn + ey * c;\n" ++
+    "        ellipse(g, x, y, ux, uy, R * 1.9 + 1, R * 0.95 + 1, '#000000');\n" ++
+    "        ellipse(g, x, y, ux, uy, R * 1.9, R * 0.95, '#f2f5ff');\n" ++
+    "        ellipse(g, x - ux * R * 0.6, y - uy * R * 0.6, ux, uy, R * 0.7, R * 0.35, '#ffffff');\n" ++
+    "      } else if (T === 4) {\n" ++
+    "        var open = bite > 0.3 ? 0.95 + 0.15 * Math.sin(now / 60) : 0.75;\n" ++
+    "        ellipse(g, x, y, nx, ny, R * 1.25 * open + 0.5, R * 0.75 * open + 0.5, '#2a0408');\n" ++
+    "        ellipse(g, x, y, nx, ny, R * 1.15 * open, R * 0.6 * open, '#120105');\n" ++
+    "        var nt = Math.max(5, Math.round(R * 3));\n" ++
+    "        for (var k = 0; k < nt; k++) {\n" ++
+    "          var a = k * 6.2832 / nt, cx2 = Math.cos(a), cy2 = Math.sin(a);\n" ++
+    "          var ox = x + (nx * cx2 * R * 1.2 + d[0] * cy2 * R * 0.7) * open, oy = y + (ny * cx2 * R * 1.2 + d[1] * cy2 * R * 0.7) * open;\n" ++
+    "          var ix = x + (ox - x) * 0.55, iy = y + (oy - y) * 0.55;\n" ++
+    "          g.fillStyle = '#f7f3ea'; g.fillRect(Math.round(ox), Math.round(oy), 1, 1); g.fillRect(Math.round((ox + ix) / 2), Math.round((oy + iy) / 2), 1, 1);\n" ++
+    "        }\n" ++
+    "      } else if (T === 8) {\n" ++
+    "        if (boost > 0) {\n" ++
+    "          var fl = R * (2.5 + Math.random() * 1.5);\n" ++
+    "          tri(g, [x - d[1] * R, y + d[0] * R], [x + d[0] * fl * 1.6, y + d[1] * fl * 1.6], [x + d[1] * R, y - d[0] * R], '#ff8a2a');\n" ++
+    "          tri(g, [x - d[1] * R * 0.5, y + d[0] * R * 0.5], [x + d[0] * fl, y + d[1] * fl], [x + d[1] * R * 0.5, y - d[0] * R * 0.5], '#ffe27a');\n" ++
+    "        }\n" ++
+    "        disc(g, x + d[0] * R * 0.4, y + d[1] * R * 0.4, Math.max(0.8, R * 0.55), boost > 0 ? '#ffb060' : '#7a2a08');\n" ++
+    "      } else if (T === 2) {\n" ++
+    "        g.fillStyle = 'rgba(120,135,170,0.55)'; g.fillRect(Math.round(x - R * 0.5), Math.round(y - R * 0.6), Math.max(1, Math.round(R)), 1);\n" ++
+    "      }\n" ++
+    "    }\n" ++
+    "  }\n" ++
+    "  /* draw one body in the chosen look onto buffer context g (size w x h); key names the goo layer to reuse */\n" ++
+    "  function drawBody(key, g, w, h, bd, hue, P, s, look, now, bite, boost) {\n" ++
+    "    if (STYLE !== 'symbiote') { drawCreature(g, bd, hue, P, s, look, now, bite, boost); return; }\n" ++
+    "    var L = getLayer(key, w, h); L.u32.fill(0);\n" ++
+    "    gooField(L, bd, hue, P, s, now);\n" ++
+    "    L.g.putImageData(L.img, 0, 0);\n" ++
+    "    g.drawImage(L.cv, 0, 0);\n" ++
+    "    gooParts(g, bd, hue, P, s, look, now, bite, boost);\n" ++
+    "  }\n" ++
+    "\n" ++
     "  /* ---------- backgrounds: one look per task, computed per pixel in world coordinates so the camera moves through them ---------- */\n" ++
     "  var PAL = [\n" ++
     "    [[2, 5, 12], [5, 12, 26], [9, 22, 42], [15, 36, 62], [24, 54, 86]],          /* abyss */\n" ++
@@ -271,6 +411,10 @@ fun part1() {
     "          var c = vn(u * 70 + tt * 6, v * 70 - tt * 4); if (c > 0.68) val += (c - 0.68) * 2.6;\n" ++
     "          if (h2(Math.floor(u * 900), Math.floor(v * 900)) > 0.985) val += 0.35;\n" ++
     "        } else {\n" ++
+    ""
+}
+
+fun part2() {
     "          var cx = u - 0.5, cy = v - 0.5, r = Math.sqrt(cx * cx + cy * cy);\n" ++
     "          if (r < 0.16) {\n" ++
     "            var gu = (u * 45) % 1, gv = (v * 45) % 1;\n" ++
@@ -340,6 +484,7 @@ fun part1() {
     "  function drawTask(t, now) {\n" ++
     "    var c = fitCanvas(t); if (!c) return;\n" ++
     "    var G = c.g, W = c.w, H = c.h, d = st[t];\n" ++
+    "    PX = STYLE === 'symbiote' ? 2 : 3;\n" ++
     "    var bw = Math.ceil(W / PX), bh = Math.ceil(H / PX), b = getBuf(t, bw, bh), g = b.g;\n" ++
     "    /* the camera frames every body and the target, zooming smoothly */\n" ++
     "    var mnx = 0.5, mny = 0.5, mxx = 0.5, mxy = 0.5, q, bb;\n" ++
@@ -380,7 +525,7 @@ fun part1() {
     "        for (i = 0; i < bd.length / 5; i++) P.push([SX(bd[i * 5 + 3] / 1000), SY(bd[i * 5 + 4] / 1000)]);\n" ++
     "        var lk = look;\n" ++
     "        if (t >= 1 && d.b.length > 1) { var o = d.b[1 - bi][1]; lk = [SX(o[3] / 1000), SY(o[4] / 1000)]; }\n" ++
-    "        drawCreature(g, bd, B[0], P, s, lk, now, B[6] / 100, B[8] || 0);\n" ++
+    "        drawBody('t' + t + 'b' + bi, g, bw, bh, bd, B[0], P, s, lk, now, B[6] / 100, B[8] || 0);\n" ++
     "        if (B[7] > 0) { g.fillStyle = 'rgba(125,255,150,0.5)'; for (var vv = 0; vv < P.length; vv++) if ((vv + Math.floor(now / 120)) % 3 === 0) g.fillRect(Math.round(P[vv][0]), Math.round(P[vv][1]) - 1, 1, 1); }\n" ++
     "      }\n" ++
     "      /* particles: bubbles rise and fade, bursts fly out */\n" ++
@@ -411,10 +556,6 @@ fun part1() {
     "      var gr = G.createRadialGradient(gx, gy, 0, gx, gy, R0); gr.addColorStop(0, t === 0 ? 'rgba(255,200,90,0.45)' : 'rgba(255,140,110,0.22)'); gr.addColorStop(1, 'rgba(0,0,0,0)');\n" ++
     "      G.fillStyle = gr; G.fillRect(gx - R0, gy - R0, R0 * 2, R0 * 2);\n" ++
     "    }\n" ++
-    ""
-}
-
-fun part2() {
     "    if (t === 2 && d) for (bi = 0; bi < d.b.length; bi++) if (d.b[bi][3] > 0) {\n" ++
     "      var cb = d.b[bi][1], hx2 = SX(cb[3] / 1000) * PX, hy2 = SY(cb[4] / 1000) * PX, R1 = 50;\n" ++
     "      var gr2 = G.createRadialGradient(hx2, hy2, 0, hx2, hy2, R1); gr2.addColorStop(0, 'rgba(255,60,40,' + (0.05 * d.b[bi][3]) + ')'); gr2.addColorStop(1, 'rgba(0,0,0,0)');\n" ++
@@ -474,6 +615,10 @@ fun part2() {
     "\n" ++
     "  /* ---------- the champion portrait ---------- */\n" ++
     "  var cbuf = null;\n" ++
+    ""
+}
+
+fun part3() {
     "  function drawChamp() {\n" ++
     "    if (!champ) return;\n" ++
     "    var cv = $('c-cv'); if (!cv) return;\n" ++
@@ -487,7 +632,7 @@ fun part2() {
     "    for (i = 0; i < n; i++) { var x = bd[i * 5 + 3], y = bd[i * 5 + 4]; mnx = Math.min(mnx, x); mxx = Math.max(mxx, x); mny = Math.min(mny, y); mxy = Math.max(mxy, y); }\n" ++
     "    var span = Math.max(mxx - mnx, mxy - mny, 20) / 1000, s = bw * 0.6 / span, P = [];\n" ++
     "    for (i = 0; i < n; i++) P.push([bw / 2 + ((bd[i * 5 + 3] - (mnx + mxx) / 2) / 1000) * s, bh / 2 + ((bd[i * 5 + 4] - (mny + mxy) / 2) / 1000) * s]);\n" ++
-    "    drawCreature(g, bd, B[0], P, s, [bw / 2 + 20, bh / 2], performance.now(), 0, 0);\n" ++
+    "    drawBody('champ', g, bw, bh, bd, B[0], P, s, [bw / 2 + 20, bh / 2], performance.now(), 0, 0);\n" ++
     "    G.imageSmoothingEnabled = false; G.clearRect(0, 0, W, H); G.drawImage(cbuf.cv, 0, 0, W, H);\n" ++
     "    var cnt = [0, 0, 0, 0, 0, 0, 0, 0, 0]; for (i = 0; i < n; i++) cnt[bd[i * 5]]++;\n" ++
     "    $('c-title').textContent = 'Pool ' + (champ.k + 1) + ' champion';\n" ++
