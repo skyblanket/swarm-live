@@ -377,8 +377,8 @@ fun part1() {
     "    }\n" ++
     "  }\n" ++
     "  /* draw one body in the chosen look onto buffer context g (size w x h); key names the goo layer to reuse */\n" ++
-    "  function drawBody(key, g, w, h, bd, hue, P, s, look, now, bite, boost) {\n" ++
-    "    if (STYLE !== 'symbiote') { drawCreature(g, bd, hue, P, s, look, now, bite, boost); return; }\n" ++
+    "  function drawBody(key, g, w, h, bd, hue, P, s, look, now, bite, boost, pixel) {\n" ++
+    "    if (STYLE !== 'symbiote' || pixel) { drawCreature(g, bd, hue, P, s, look, now, bite, boost); return; }\n" ++
     "    var L = getLayer(key, w, h); L.u32.fill(0);\n" ++
     "    gooField(L, bd, hue, P, s, now);\n" ++
     "    L.g.putImageData(L.img, 0, 0);\n" ++
@@ -525,7 +525,8 @@ fun part2() {
     "        for (i = 0; i < bd.length / 5; i++) P.push([SX(bd[i * 5 + 3] / 1000), SY(bd[i * 5 + 4] / 1000)]);\n" ++
     "        var lk = look;\n" ++
     "        if (t >= 1 && d.b.length > 1) { var o = d.b[1 - bi][1]; lk = [SX(o[3] / 1000), SY(o[4] / 1000)]; }\n" ++
-    "        drawBody('t' + t + 'b' + bi, g, bw, bh, bd, B[0], P, s, lk, now, B[6] / 100, B[8] || 0);\n" ++
+    "        /* the prey in the hunt keep the pixel look, so the black symbiote hunter stands out against them */\n" ++
+    "        drawBody('t' + t + 'b' + bi, g, bw, bh, bd, B[0], P, s, lk, now, B[6] / 100, B[8] || 0, t === 1 && bi === 1);\n" ++
     "        if (B[7] > 0) { g.fillStyle = 'rgba(125,255,150,0.5)'; for (var vv = 0; vv < P.length; vv++) if ((vv + Math.floor(now / 120)) % 3 === 0) g.fillRect(Math.round(P[vv][0]), Math.round(P[vv][1]) - 1, 1, 1); }\n" ++
     "      }\n" ++
     "      /* particles: bubbles rise and fade, bursts fly out */\n" ++
@@ -614,11 +615,11 @@ fun part2() {
     "  function bar(v) { var k = Math.round(clamp(v, 0, 1) * 6), s = ''; for (var i = 0; i < 6; i++) s += i < k ? '|' : '.'; return s; }\n" ++
     "\n" ++
     "  /* ---------- the champion portrait ---------- */\n" ++
-    "  var cbuf = null;\n" ++
     ""
 }
 
 fun part3() {
+    "  var cbuf = null;\n" ++
     "  function drawChamp() {\n" ++
     "    if (!champ) return;\n" ++
     "    var cv = $('c-cv'); if (!cv) return;\n" ++

@@ -364,8 +364,8 @@
     }
   }
   /* draw one body in the chosen look onto buffer context g (size w x h); key names the goo layer to reuse */
-  function drawBody(key, g, w, h, bd, hue, P, s, look, now, bite, boost) {
-    if (STYLE !== 'symbiote') { drawCreature(g, bd, hue, P, s, look, now, bite, boost); return; }
+  function drawBody(key, g, w, h, bd, hue, P, s, look, now, bite, boost, pixel) {
+    if (STYLE !== 'symbiote' || pixel) { drawCreature(g, bd, hue, P, s, look, now, bite, boost); return; }
     var L = getLayer(key, w, h); L.u32.fill(0);
     gooField(L, bd, hue, P, s, now);
     L.g.putImageData(L.img, 0, 0);
@@ -508,7 +508,8 @@
         for (i = 0; i < bd.length / 5; i++) P.push([SX(bd[i * 5 + 3] / 1000), SY(bd[i * 5 + 4] / 1000)]);
         var lk = look;
         if (t >= 1 && d.b.length > 1) { var o = d.b[1 - bi][1]; lk = [SX(o[3] / 1000), SY(o[4] / 1000)]; }
-        drawBody('t' + t + 'b' + bi, g, bw, bh, bd, B[0], P, s, lk, now, B[6] / 100, B[8] || 0);
+        /* the prey in the hunt keep the pixel look, so the black symbiote hunter stands out against them */
+        drawBody('t' + t + 'b' + bi, g, bw, bh, bd, B[0], P, s, lk, now, B[6] / 100, B[8] || 0, t === 1 && bi === 1);
         if (B[7] > 0) { g.fillStyle = 'rgba(125,255,150,0.5)'; for (var vv = 0; vv < P.length; vv++) if ((vv + Math.floor(now / 120)) % 3 === 0) g.fillRect(Math.round(P[vv][0]), Math.round(P[vv][1]) - 1, 1, 1); }
       }
       /* particles: bubbles rise and fade, bursts fly out */
