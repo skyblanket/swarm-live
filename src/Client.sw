@@ -74,6 +74,31 @@ fun js() {
     "function applyStream(m){\n" ++
     "  var c=document.getElementById(m.id);\n" ++
     "  if(!c)return;\n" ++
+    "  /* sw-canvas containers: draw/clear ink on a lazily-created canvas. */\n" ++
+    "  if(m.op==='draw'||(m.op==='reset'&&c.hasAttribute('sw-canvas'))){\n" ++
+    "    var cv=c.querySelector('canvas');\n" ++
+    "    if(!cv){cv=document.createElement('canvas');cv.width=1600;cv.height=900;\n" ++
+    "      cv.style.cssText='position:absolute;top:0;left:0;width:100%;height:100%';\n" ++
+    "      c.appendChild(cv)}\n" ++
+    "    var g=cv.getContext('2d');\n" ++
+    "    if(m.op==='reset'){g.clearRect(0,0,cv.width,cv.height);return}\n" ++
+    "    g.lineCap='round';g.lineWidth=4;\n" ++
+    "    (m.segs||[]).forEach(function(s){\n" ++
+    "      g.strokeStyle=s[4];g.beginPath();\n" ++
+    "      g.moveTo(s[0]*cv.width,s[1]*cv.height);\n" ++
+    "      g.lineTo(s[2]*cv.width,s[3]*cv.height);g.stroke()});\n" ++
+    "    return}\n" ++
+    "  /* upsert: replace each sw-key'd child in place, else append.\n" ++
+    "     Takes m.html (one) or m.htmls (a batch). */\n" ++
+    "  if(m.op==='upsert'){\n" ++
+    "    var hs=m.htmls||[m.html];\n" ++
+    "    hs.forEach(function(h){\n" ++
+    "      var t2=document.createElement('div');t2.innerHTML=h;\n" ++
+    "      var nn=t2.firstChild;if(!nn)return;\n" ++
+    "      nn._t=Date.now();\n" ++
+    "      var old=c.querySelector('[sw-key=\"'+nn.getAttribute('sw-key')+'\"]');\n" ++
+    "      if(old)c.replaceChild(nn,old);else c.appendChild(nn)});\n" ++
+    "    return}\n" ++
     "  if(m.op==='reset'){c.innerHTML='';return}\n" ++
     "  if(m.op==='delete'){\n" ++
     "    var d=c.querySelector('[sw-key=\"'+m.key+'\"]');\n" ++
@@ -118,6 +143,7 @@ fun js() {
     "      for(k in c)dynamics[parseInt(k,10)]=c[k];\n" ++
     "      render()}\n" ++
     "    else if(msg.t==='s'){applyStream(msg)}\n" ++
+    "    else if(msg.t==='ev'){var f=window.SwEvents&&window.SwEvents[msg.n];if(f)f(msg.d)}\n" ++
     "    else if(msg.t==='patch'){history.pushState({},'',msg.p)}\n" ++
     "  };\n" ++
     "  ws.onclose=function(){\n" ++
@@ -132,6 +158,8 @@ fun js() {
     "  if(ws&&ws.readyState===1)\n" ++
     "    ws.send(JSON.stringify({t:'e',n:n,v:v||{}}))\n" ++
     "}\n" ++
+    "\n" ++
+    "window.swSend=send;\n" ++
     "\n" ++
     "/* Live navigation: change the URL, ask the server to re-mount. */\n" ++
     "function navTo(path,push){\n" ++
@@ -226,6 +254,27 @@ fun js() {
     "      send(el.getAttribute('sw-scroll'),\n" ++
     "        {scrollTop:el.scrollTop,scrollLeft:el.scrollLeft,\n" ++
     "         scrollHeight:el.scrollHeight,clientHeight:el.clientHeight})})});\n" ++
+    "  /* sw-click-key=\"evt\": one delegated click handler on a container;\n" ++
+    "     sends {key} of the nearest [sw-key] ancestor of the click. */\n" ++
+    "  document.querySelectorAll('[sw-click-key]').forEach(function(el){\n" ++
+    "    el.onclick=function(e){\n" ++
+    "      var k=e.target.closest&&e.target.closest('[sw-key]');\n" ++
+    "      if(k&&el.contains(k)){k.classList.add('hit');send(el.getAttribute('sw-click-key'),{key:k.getAttribute('sw-key')})}}});\n" ++
+    "  /* sw-pointer=\"evt\": normalized (0..1) pointer events, throttled.\n" ++
+    "     Sends {k:'down'|'draw'|'move'|'up', x, y}. */\n" ++
+    "  document.querySelectorAll('[sw-pointer]').forEach(function(el){\n" ++
+    "    if(el._swp)return;el._swp=1;\n" ++
+    "    var ev=el.getAttribute('sw-pointer'),last=0,down=false;\n" ++
+    "    function pos(e){var r=el.getBoundingClientRect();\n" ++
+    "      return {x:Math.min(1,Math.max(0,(e.clientX-r.left)/r.width)),\n" ++
+    "              y:Math.min(1,Math.max(0,(e.clientY-r.top)/r.height))}}\n" ++
+    "    el.onpointerdown=function(e){down=true;\n" ++
+    "      try{el.setPointerCapture(e.pointerId)}catch(x){}\n" ++
+    "      var p=pos(e);send(ev,{k:'down',x:p.x,y:p.y})};\n" ++
+    "    el.onpointermove=function(e){var n=Date.now();if(n-last<25)return;last=n;\n" ++
+    "      var p=pos(e);send(ev,{k:down?'draw':'move',x:p.x,y:p.y})};\n" ++
+    "    el.onpointerup=function(e){if(!down)return;down=false;\n" ++
+    "      var p=pos(e);send(ev,{k:'up',x:p.x,y:p.y})}});\n" ++
     "  /* sw-enter: fire event when Enter is pressed (no form wrapper needed). */\n" ++
     "  document.querySelectorAll('[sw-enter]').forEach(function(el){\n" ++
     "    el.onkeydown=function(e){\n" ++
@@ -233,6 +282,15 @@ fun js() {
     "        e.preventDefault();\n" ++
     "        send(el.getAttribute('sw-enter'),el.value||getVals(el))}}})\n" ++
     "}\n" ++
+    "\n" ++
+    "/* sw-ttl=\"ms\": drop stream children not refreshed within ms\n" ++
+    "   (ephemeral things like remote cursors). */\n" ++
+    "setInterval(function(){\n" ++
+    "  var now=Date.now();\n" ++
+    "  document.querySelectorAll('[sw-ttl]').forEach(function(c){\n" ++
+    "    var ttl=parseInt(c.getAttribute('sw-ttl'),10);\n" ++
+    "    Array.prototype.slice.call(c.children).forEach(function(k){\n" ++
+    "      if(k._t&&now-k._t>ttl)c.removeChild(k)})})},1000);\n" ++
     "\n" ++
     "connect();\n" ++
     "\n" ++

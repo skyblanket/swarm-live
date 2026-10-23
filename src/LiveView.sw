@@ -188,7 +188,13 @@ fun esc(s) {
 # ------------------------------------------------------------
 # Page shell — the dead-render HTML wrapper + embedded client
 # ------------------------------------------------------------
-fun page(title, body) {
+fun page(title, body) { page_js(title, body, "") }
+
+# page_js: same shell, plus an optional per-view script (the view map's
+# `js` key) that runs after the client boots. It can use window.swSend(name,
+# value) to talk to handle_event and register window.SwEvents[name] = fn to
+# receive {t:"ev", n:name, d:data} frames the server ws_sends (see client.sw).
+fun page_js(title, body, js) {
     "<!DOCTYPE html><html><head><meta charset=\"utf-8\">" ++
     "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" ++
     "<title>" ++ esc(title) ++ "</title>" ++
@@ -200,7 +206,14 @@ fun page(title, body) {
     "input,textarea,select{background:#1a1a1a;color:#e6e6e6;border:1px solid #333;" ++
     "border-radius:6px;padding:8px 12px;outline:none}</style>" ++
     "</head><body><div id=\"live-root\">" ++ body ++ "</div>" ++
-    "<script>" ++ Client.js() ++ "</script></body></html>"
+    "<script>" ++ Client.js() ++ "</script>" ++
+    (if (js == "") { "" } else { "<script>" ++ js ++ "</script>" }) ++
+    "</body></html>"
+}
+
+fun lv_js(view) {
+    j = map_get(view, 'js')
+    if (j == nil) { "" } else { to_string(j) }
 }
 
 fun lv_title(view) {
@@ -431,7 +444,9 @@ fun serve(routes) {
             http_respond(conn, 204, "", "")
             serve(routes)
 
-        {'http_request', conn, 'GET', path, _h, _b} ->
+        {'http_request', conn, 'GET', rawpath, _h, _b} ->
+            # route on the path alone: "/?x=1" must still match "/"
+            path = hd(string_split(to_string(rawpath), "?"))
             matched = match_route(routes, path)
             if (matched == nil) {
                 http_respond(conn, 404, "Content-Type: text/html\r\n",
@@ -443,7 +458,7 @@ fun serve(routes) {
                 # presence side effects on the plain GET.
                 dr = mfn(map_put(map_get(matched, 'params'), '_connected', 'false'))
                 http_respond(conn, 200, "Content-Type: text/html\r\n",
-                             page(lv_title(v), stitch(render_view(v, dr))))
+                             page_js(lv_title(v), stitch(render_view(v, dr)), lv_js(v)))
             }
             serve(routes)
 
@@ -542,7 +557,8 @@ fun session_loop(conn, routes, view, assigns, last_s, last_d) {
                 he = map_get(view, 'handle_event')
                 new_assigns = if (he == nil) { assigns }
                               else { he(map_get(msg, 'n'), map_get(msg, 'v'), assigns) }
-                push_update(conn, routes, view, new_assigns, last_s, last_d)
+                st = push_update(conn, view, new_assigns, last_s, last_d)
+                session_loop(conn, routes, view, new_assigns, elem(st, 0), elem(st, 1))
             }}
 
         {'ws_close', _c} ->
@@ -554,7 +570,9 @@ fun session_loop(conn, routes, view, assigns, last_s, last_d) {
             if (hi == nil) {
                 session_loop(conn, routes, view, assigns, last_s, last_d)
             } else {
-                push_update(conn, routes, view, hi(other, assigns), last_s, last_d)
+                new_assigns = hi(other, assigns)
+                st = push_update(conn, view, new_assigns, last_s, last_d)
+                session_loop(conn, routes, view, new_assigns, elem(st, 0), elem(st, 1))
             }
 
         after 90000 {
@@ -572,7 +590,12 @@ fun session_loop(conn, routes, view, assigns, last_s, last_d) {
 # itself changed (a conditional flipped, a list grew), fall back to a
 # fresh mount — correct, just less frugal; Phase 2 makes structural
 # change incremental too.
-fun push_update(conn, routes, view, assigns, last_s, last_d) {
+#
+# Returns {statics, dstrings} for the caller to loop with. It must NOT
+# call session_loop itself: mutual tail calls aren't TCO'd, so every
+# event would grow the stack until it overflowed (high-rate events like
+# pointer moves hit that within seconds). session_loop self-tail-calls.
+fun push_update(conn, view, assigns, last_s, last_d) {
     rendered = render_view(view, assigns)
     statics = map_get(rendered, 's')
     dstrings = dyn_strings(map_get(rendered, 'd'), [])
@@ -586,5 +609,5 @@ fun push_update(conn, routes, view, assigns, last_s, last_d) {
             'noop'
         }
     }
-    session_loop(conn, routes, view, assigns, statics, dstrings)
+    {statics, dstrings}
 }
