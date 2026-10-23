@@ -99,6 +99,8 @@
   }
   window.SwEvents.champ = function (d) { champ = d; drawChamp(); };
   window.SwEvents.stats = function (d) {
+    if (!d.hist && stats) d.hist = stats.hist;
+    if (!d.hist) d.hist = [];
     stats = d;
     var a = $('o-tr'); if (a) a.textContent = fmtc(d.trials);
     var b = $('o-procs'); if (b) b.textContent = fmtc(d.procs);

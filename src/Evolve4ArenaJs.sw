@@ -108,6 +108,8 @@ fun part0() {
     "  }\n" ++
     "  window.SwEvents.champ = function (d) { champ = d; drawChamp(); };\n" ++
     "  window.SwEvents.stats = function (d) {\n" ++
+    "    if (!d.hist && stats) d.hist = stats.hist;\n" ++
+    "    if (!d.hist) d.hist = [];\n" ++
     "    stats = d;\n" ++
     "    var a = $('o-tr'); if (a) a.textContent = fmtc(d.trials);\n" ++
     "    var b = $('o-procs'); if (b) b.textContent = fmtc(d.procs);\n" ++
@@ -205,12 +207,12 @@ fun part0() {
     "          disc(g, x, y, R + 1, '#2a0508');\n" ++
     "          disc(g, x, y, R, '#8a1c26');\n" ++
     "          var open = bite > 0.3 ? 0.62 + 0.15 * Math.sin(now / 60) : 0.45;\n" ++
-    "          disc(g, x, y, R * open, '#120306');\n" ++
-    "          var nt = Math.max(4, Math.round(R * 2.2)), rot = now / 900;\n" ++
     ""
 }
 
 fun part1() {
+    "          disc(g, x, y, R * open, '#120306');\n" ++
+    "          var nt = Math.max(4, Math.round(R * 2.2)), rot = now / 900;\n" ++
     "          g.fillStyle = '#f6f0e4';\n" ++
     "          for (var k = 0; k < nt; k++) { var a = rot + k * 6.2832 / nt; g.fillRect(Math.round(x + Math.cos(a) * R * (open + 0.12)), Math.round(y + Math.sin(a) * R * (open + 0.12)), 1, 1); }\n" ++
     "        } else if (T === 5) {\n" ++
@@ -409,12 +411,12 @@ fun part1() {
     "      var gr = G.createRadialGradient(gx, gy, 0, gx, gy, R0); gr.addColorStop(0, t === 0 ? 'rgba(255,200,90,0.45)' : 'rgba(255,140,110,0.22)'); gr.addColorStop(1, 'rgba(0,0,0,0)');\n" ++
     "      G.fillStyle = gr; G.fillRect(gx - R0, gy - R0, R0 * 2, R0 * 2);\n" ++
     "    }\n" ++
-    "    if (t === 2 && d) for (bi = 0; bi < d.b.length; bi++) if (d.b[bi][3] > 0) {\n" ++
-    "      var cb = d.b[bi][1], hx2 = SX(cb[3] / 1000) * PX, hy2 = SY(cb[4] / 1000) * PX, R1 = 50;\n" ++
     ""
 }
 
 fun part2() {
+    "    if (t === 2 && d) for (bi = 0; bi < d.b.length; bi++) if (d.b[bi][3] > 0) {\n" ++
+    "      var cb = d.b[bi][1], hx2 = SX(cb[3] / 1000) * PX, hy2 = SY(cb[4] / 1000) * PX, R1 = 50;\n" ++
     "      var gr2 = G.createRadialGradient(hx2, hy2, 0, hx2, hy2, R1); gr2.addColorStop(0, 'rgba(255,60,40,' + (0.05 * d.b[bi][3]) + ')'); gr2.addColorStop(1, 'rgba(0,0,0,0)');\n" ++
     "      G.fillStyle = gr2; G.fillRect(hx2 - R1, hy2 - R1, R1 * 2, R1 * 2);\n" ++
     "    }\n" ++

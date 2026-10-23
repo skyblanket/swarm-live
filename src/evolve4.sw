@@ -2918,7 +2918,8 @@ fun pool_rows(s, k, n) {
         [[k, num(map_get(g(s, 'gens'), k)), if (e == nil) { [] } else { [r2(elem(e, 2)), r2(elem(e, 3)), r2(elem(e, 4)), elem(e, 5)] }, list_or_empty(map_get(g(s, 'last'), k)), num(map_get(g(s, 'ms'), k))] | pool_rows(s, k + 1, n)]
     }
 }
-fun hist_rows(s, k, n) { if (k >= n) { [] } else { [list_or_empty(map_get(g(s, 'hist'), k)) | hist_rows(s, k + 1, n)] } }
+# the last 60 generations per pool (a long history in one frame grew past ~100 KB and broke the WebSocket)
+fun hist_rows(s, k, n) { if (k >= n) { [] } else { [Std.take(list_or_empty(map_get(g(s, 'hist'), k)), 60) | hist_rows(s, k + 1, n)] } }
 fun hub_loop(s) {
     receive {
         {'hello', k, pid} -> hub_loop(p(s, 'pids', map_put(g(s, 'pids'), k, pid)))
@@ -2933,9 +2934,10 @@ fun hub_loop(s) {
             hub_loop(s2)
         {'tick'} ->
             n = g(s, 'n')
-            LiveView.broadcast("arena", {'frame', json_encode(%{t: "ev", n: "stats", d: %{pools: pool_rows(s, 0, n), hist: hist_rows(s, 0, n), trials: g(s, 'trials'),
+            nt = num(g(s, 'ticks')) + 1
+            LiveView.broadcast("arena", {'frame', json_encode(%{t: "ev", n: "stats", d: %{pools: pool_rows(s, 0, n), hist: if (nt % 5 == 1) { hist_rows(s, 0, n) } else { nil }, trials: g(s, 'trials'),
                 up: (timestamp() - g(s, 't0')) / 1000, procs: num(map_get(swarm_stats(), 'processes')), show: g(s, 'show')}})})
-            hub_loop(s)
+            hub_loop(p(s, 'ticks', nt))
         {'get', from, r} ->
             n = g(s, 'n')
             k = r % n
