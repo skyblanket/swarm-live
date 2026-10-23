@@ -2663,41 +2663,49 @@ fun lt_loop(c, f, d0, got, tick, seed, plast, live) {
     }
 }
 
-# ---- task 2: chase. The prey is an evolved creature too, from the pool's own prey population, scored on
-# staying away. It starts 0.35 away; when a hunter's body touches its core it is caught and reappears 0.35 away.
-# hunter: catches + closeness, divided by its size cost; prey: distance kept - half a point per catch ----
-fun touch_any(nodes, spec, x, y) {
-    if (length(nodes) == 0) { false }
-    else {
-        n = hd(nodes)
-        r = elem(hd(spec), 0) + 0.012
-        dx = elem(n, 0) - x
-        dy = elem(n, 1) - y
-        if (dx * dx + dy * dy < r * r) { true } else { touch_any(tl(nodes), tl(spec), x, y) }
-    }
-}
+# ---- task 2: hunt. The prey is an evolved creature too, from the pool's own prey population. Hunter and prey
+# collide with the fight's contact physics (spikes wound, stingers poison, armor protects, hits knock apart), so
+# the prey can fight back. Prey have 200 health, hunters 300; a prey killed is replaced by a fresh one 0.35 away,
+# and a hunter killed ends the hunt.
+#   hunter: 3 per kill + damage dealt / 100 - half the damage taken / 100 + a little for staying close, / size cost
+#   prey:   time kept away (0..1) + damage dealt to the hunter / 100 - damage taken / 150 - 1 per death ----
 fun chase_T() { 700 }
 fun prey_at(ha, hb, seed, k, hx, hy) {
     a = hr(seed, 2000 + k) * 6.2832
-    tr_new(ha, hb, 2, clampf(hx + Math.cos(a) * 0.35, 0.15, WS - 0.15), clampf(hy + Math.sin(a) * 0.35, 0.15, WS - 0.15), Math.cos(a), Math.sin(a))
+    c = tr_new(ha, hb, 2, clampf(hx + Math.cos(a) * 0.35, 0.15, WS - 0.15), clampf(hy + Math.sin(a) * 0.35, 0.15, WS - 0.15), Math.cos(a), Math.sin(a))
+    p(p(c, 'h', 200.0), 'hmax', 200.0)
 }
 fun t_chase(ha, hb, pa, pb, seed, plast, live) {
     a = hr(seed, 101) * 6.2832
-    c = tr_new(ha, hb, 1, 0.8, 0.8, Math.cos(a), Math.sin(a))
-    r = ch_loop(c, prey_at(pa, pb, seed, 0, 0.8, 0.8), pa, pb, 0, 0.0, 0, seed, plast, live)
+    c = p(p(tr_new(ha, hb, 1, 0.8, 0.8, Math.cos(a), Math.sin(a)), 'h', 300.0), 'hmax', 300.0)
+    r = ch_loop(c, prey_at(pa, pb, seed, 0, 0.8, 0.8), pa, pb, 0, 0.0, 0, 0.0, 0.0, seed, plast, live)
     {elem(r, 0) / size_cost(c), elem(r, 1)}
 }
-fun ch_loop(c, pr, pa, pb, caught, close, tick, seed, plast, live) {
-    sc = to_float(caught) + close / to_float(chase_T())
-    if (tick >= chase_T()) { {sc, (to_float(chase_T()) - close) / to_float(chase_T()) - 0.5 * to_float(caught)} }
+fun hunt_scores(c, kills, close, tick, dealt, taken) {
+    tf = to_float(chase_T())
+    far = to_float(tick) - close + to_float(chase_T() - tick)
+    {3.0 * to_float(kills) + dealt / 100.0 - 0.5 * taken / 100.0 + 0.5 * close / tf,
+     far / tf + taken / 100.0 - dealt / 150.0 - to_float(kills)}
+}
+# dealt: damage the hunter did to prey; taken: damage the prey did to the hunter
+fun ch_loop(c, pr, pa, pb, kills, close, tick, dealt, taken, seed, plast, live) {
+    if (tick >= chase_T() || g(c, 'h') <= 0.0) {
+        if (live > 0) { live_frame(1, tick, [c, pr], nil, elem(hunt_scores(c, kills, close, tick, dealt, taken), 0), kills) } else { 'x' }
+        hunt_scores(c, kills, close, tick, dealt, taken)
+    }
     else {
-        if (live > 0) { live_frame(1, tick, [c, pr], nil, sc, caught) } else { 'x' }
-        c1 = tr_move(c, tr_sens(c, nil, near_item(c, g(pr, 'x'), g(pr, 'y')), 0.0, hd(g(pr, 'ph')) - hd(g(c, 'ph'))), tick, plast)
+        if (live > 0) { live_frame(1, tick, [c, pr], nil, elem(hunt_scores(c, kills, close, tick, dealt, taken), 0), kills) } else { 'x' }
+        c1 = tr_move(c, tr_sens(c, nil, near_item(c, g(pr, 'x'), g(pr, 'y')), if (g(pr, 'nspk') > 0) { 0.5 } else { 0.0 }, hd(g(pr, 'ph')) - hd(g(c, 'ph'))), tick, plast)
         pr1 = tr_move(pr, tr_sens(pr, nil, near_item(pr, g(c, 'x'), g(c, 'y')), 1.0, hd(g(c, 'ph')) - hd(g(pr, 'ph'))), tick, plast)
-        hit = touch_any(g(c1, 'nodes'), g(c1, 'spec'), g(pr1, 'x'), g(pr1, 'y'))
-        pr2 = if (hit) { prey_at(pa, pb, seed, caught + 1, g(c1, 'x'), g(c1, 'y')) } else { pr1 }
-        d = dist_to(c1, g(pr2, 'x'), g(pr2, 'y'))
-        ch_loop(c1, pr2, pa, pb, if (hit) { caught + 1 } else { caught }, close + 1.0 - fmin(d, 0.6) / 0.6, tick + 1, seed, plast, live)
+        r = contact_step([c1, pr1])
+        c2 = find_id(r, 1)
+        pr2 = find_id(r, 2)
+        dl = fmax(0.0, g(pr, 'h') - g(pr2, 'h'))
+        tk = fmax(0.0, g(c, 'h') - g(c2, 'h'))
+        dead = g(pr2, 'h') <= 0.0
+        pr3 = if (dead) { prey_at(pa, pb, seed, kills + 1, g(c2, 'x'), g(c2, 'y')) } else { pr2 }
+        d = dist_to(c2, g(pr3, 'x'), g(pr3, 'y'))
+        ch_loop(c2, pr3, pa, pb, if (dead) { kills + 1 } else { kills }, close + 1.0 - fmin(d, 0.6) / 0.6, tick + 1, dealt + dl, taken + tk, seed, plast, live)
     }
 }
 
